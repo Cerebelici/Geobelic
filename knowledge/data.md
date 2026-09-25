@@ -31,7 +31,7 @@ Allowed: any open pretrained model (the brief names SAM and YOLO as examples), o
 
 Manual annotation of **Sireț3** happens only in Marcaj. Annotating other datasets for training is unrestricted. The orthomosaic may be retiled any way for training. The submission is the annotation of the **supplied** tiles. Using another team’s annotations is not allowed. [S-DESC]
 
-Named open datasets (names and counts are from the brief; licences and download URLs were not verified here): [S-DESC]
+Named open datasets (names and counts are from the brief): [S-DESC] Licences and downloads were checked on 2026-09-25 and written in [Research](research.md).
 
 | Dataset | What the brief says | What it is not |
 |---|---|---|

@@ -43,6 +43,7 @@ This file is the index. Each subdomain below is one file and the only place for 
 | What we decided, and what we have not | [Solution](knowledge/solution.md) |
 | Experiments still to run | [Research](knowledge/research.md) |
 | Terms | [Glossary](knowledge/glossary.md) |
+| Short working summary, formulas, and checklist | [MEMORY](MEMORY.md) |
 
 ## How to extend
 
