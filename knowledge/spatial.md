@@ -1,6 +1,6 @@
 # Spatial
 
-Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sources.md).
+Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 
 ## Challenge tiles (the surface that is scored)
 
@@ -95,7 +95,7 @@ That point lies inside the source orthomosaic footprint. [S-GEO]
 
 ## Passages and forbidden zones
 
-Both files are a single `FeatureCollection` with one feature, CRS `urn:ogc:def:crs:EPSG::32635`, geometry `MultiPolygon`. [S-GEO]
+`start.geojson`, `passages.geojson`, `forbidden.geojson`, and `study_area.geojson` are each a `FeatureCollection` with one feature and CRS `urn:ogc:def:crs:EPSG::32635`. Collection `name` values are `siret3_route_start`, `siret3_passages`, `siret3_forbidden`, and `siret3_study_area`. Passages and forbidden zones are `MultiPolygon`. The study area is a `Polygon`. The start is a `Point`. [S-GEO]
 
 | File | `properties.type` | `properties.source` | Parts | Area |
 |---|---|---|---:|---|
@@ -110,7 +110,7 @@ The overview and the passage preview show the same rotated flight: vineyards on 
 
 ## Source orthomosaic (training only)
 
-`04_source/siret3_source_orthomosaic_EPSG4326.tif`. [S-README]
+`assets/04_source/siret3_source_orthomosaic_EPSG4326.tif`. [S-README]
 
 | Property | Measured from the file [S-GEO] | Stated in the PDF [S-DESC] [S-README] |
 |---|---|---|

@@ -1,6 +1,6 @@
 # Solution
 
-Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sources.md).
+Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 
 Everything in this file is **ours**. It is not a rule. Leave a dated note when a decision changes. Do not delete rejected options; move them to the log.
 
@@ -33,6 +33,8 @@ _None. Context only, 2026-09-25._
 6. Import, publish, correct, submit in Marcaj.
 7. Export annotations, compute measurements in EPSG:32635, build inspection targets, solve the route, write `route.geojson` and `measurements.csv`, show them on the web map.
 
+The retired root summary named YOLOv8-seg, SAM, classical vision, RT-DETR, DBSCAN, and a TSP solver as a sketch. None of those is chosen.
+
 ## Open decisions
 
 | ID | Question | Blocks |
@@ -50,5 +52,6 @@ _None. Context only, 2026-09-25._
 |---|---|---|---|
 | 2026-09-25 | Capture challenge context in this file before choosing a model. | Assets and PDFs had no single index. | — |
 | 2026-09-25 | Split the single knowledge base into subdomain files under `knowledge/`. | One file mixed rules, measurements, and open decisions. | The monolithic `KNOWLEDGE_BASE.md` body. |
+| 2026-09-25 | Remove the root `KNOWLEDGE_BASE.md` and `MEMORY.md`. The index is `knowledge/README.md`. | The two root files repeated the topic files. | Those two files. |
 
 Related: [Research](research.md) · [Scoring](scoring.md)

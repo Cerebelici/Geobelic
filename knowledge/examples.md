@@ -1,6 +1,6 @@
 # Examples
 
-Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sources.md).
+Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 
 Both tiles are in `05_examples/siret3_examples_cvat.zip` (`annotations.xml` + the two original GeoTIFFs). They are a format template and a visual standard. They are not part of the score. Block ids `V01` and `V02` are local to these files, not a global map of the site. [S-README] [S-EX]
 
@@ -12,6 +12,8 @@ Preview colors (JPG only): row axes red, disrupted rows magenta, canopies green,
 | `siret3_r006_c004.tif` | `V02` | 26: 21 `regular`, 5 `disrupted`, ids `V02-R01`…`V02-R26` | 251 polygons, 5–148 points (median 15) | 25: 21 `bare_soil`, 4 `mixed` | 0 |
 
 Every shape in the example XML is `source=manual`, `occluded=0`, `z_order=0`. Every example row polyline has exactly two points. [S-EX]
+
+The quick start cites this ZIP’s import report as **2 frames and 750 objects**: 650 canopies, 51 rows, 49 inter-rows, and no waste. [S-MARCAJ] [S-EX]
 
 What the tiles show, in the README’s words: `r021_c012` is young vines on tilled soil, one polygon per plant. `r006_c004` is sparse rows with long gaps, grass strips in the inter-rows, and white vine tubes and stakes that are not waste. [S-README]
 

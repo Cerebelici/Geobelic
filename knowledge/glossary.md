@@ -1,6 +1,6 @@
 # Glossary
 
-Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sources.md).
+Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 
 | Term | Meaning |
 |---|---|
@@ -13,4 +13,5 @@ Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sourc
 | Tile | One supplied 2048×2048 GeoTIFF. |
 | Job | Marcaj work unit of up to 5 tiles. Only a submitted job is scored. |
 | Study area | Union of the 311 tiles, 81.527 ha. |
+| Exclusion attribute | The official name for `unassessable`. The object is still drawn and the value is scored. |
 | Sireț3 / Siret3 | The orthomosaic and the tile-name prefix. |

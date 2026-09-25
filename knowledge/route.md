@@ -1,10 +1,10 @@
 # Route
 
-Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sources.md).
+Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 
 Inspection targets and the walking route are application outputs. They are not Marcaj labels. [S-RULES]
 
-Targets are locations that need inspection (visible row gaps, possibly missing planting) and detected waste. Each inspection location needs an id, coordinates, and links to `vineyard_id` / `row_id`. [S-DESC]
+Targets are locations that need inspection (visible row gaps, possibly missing planting) and detected waste. The route is for inspection, waste collection, or both. Each inspection location needs an id, coordinates, and links to `vineyard_id` / `row_id`. [S-DESC]
 
 The route: [S-DESC] [S-RULES]
 

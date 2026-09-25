@@ -1,6 +1,6 @@
 # Challenge
 
-Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sources.md).
+Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 
 Deeptech GigaHack 2026, 25–27 September 2026, Tekwill, Chișinău. The challenge provider is **Marcaj** (rules, annotation platform, scoring, support). GigaHack hosts the event. Mode is online and offline. Prize is **MDL 30,000** cash for one winning team. [S-DESC]
 

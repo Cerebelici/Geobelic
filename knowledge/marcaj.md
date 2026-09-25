@@ -1,6 +1,6 @@
 # Marcaj
 
-Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sources.md).
+Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 
 Accounts are created from the team list and emailed on Friday evening (“Your Marcaj account”: address, email, generated password). No sign-up. Check spam. Language can be EN / RO / RU. The team project starts in **Draft** with the four labels already configured. Every member can upload, publish, annotate, review, and export. Agree who publishes. [S-MARCAJ] [S-DESC]
 
@@ -18,9 +18,10 @@ team_upload.zip
 - Tiles may be uploaded with no `annotations.xml` if there is no model yet. [S-MARCAJ]
 - Pre-annotations import **only before publish**, and only together with the tiles. [S-DESC]
 - Until publish, **Remove all** clears the project so a part can be re-imported. [S-MARCAJ]
-- After a ZIP imports, read the report. Skipped files or dropped objects mean a renamed tile or a typo in a label or attribute. A note that a class was “added from the label dictionary” is normal when that ZIP has no objects of that label (often `waste`). [S-MARCAJ]
-- Upload parts one by one. Wait for each report. The Data card must show **311 files**. Then publish. [S-MARCAJ]
-- Publish creates jobs of 5 tiles: **63 jobs** (62 × 5 + one job of 1). [S-MARCAJ]
+- After a ZIP imports, read the report. Skipped files or dropped objects mean a renamed tile or a typo in a label or attribute. A note that a class was “added from the label dictionary” is normal when that ZIP has no objects of that label (often `waste`). If skipped files cannot be explained, post the report in the GigaHack challenge Slack channel before publishing. [S-MARCAJ]
+- The example ZIP’s own report, cited in the quick start, is **2 frames and 750 objects**. That is 399 + 251 canopies, 25 + 26 rows, and 24 + 25 inter-rows, and no waste. [S-MARCAJ] [S-EX]
+- Upload parts one by one. Wait for each report. The Data card must show **311 files**. Use **Upload files** on the Data card. Do not use **Change** on the Labeling card, and do not use **Delete**. [S-MARCAJ]
+- Publish creates jobs of 5 tiles: **63 jobs** (62 × 5 + one job of 1). The project status becomes **Active**. [S-MARCAJ]
 - After publish: no new pre-annotations, and do not delete, add, or rename tiles, and do not edit labels. [S-DESC] [S-MARCAJ]
 
 ## Editor (after publish)
@@ -44,7 +45,7 @@ Start labeling assigns the next free job of five tiles. Two people never receive
 | Empty tile | Tick **No objects in this frame** |
 | Submit | On the last tile, Submit (`Enter`) |
 
-Shortcuts do not fire while an attribute field is focused. A job cannot be submitted while any of its tiles has no answer. [S-MARCAJ]
+Shortcuts work on any keyboard layout. They do not fire while an attribute field is focused. A job cannot be submitted while any of its tiles has no answer. [S-MARCAJ]
 
 Quick-start screenshot colors in the editor: canopies green, row axes blue, inter-row areas orange. Those are UI colors, not the example-preview colors. [S-MARCAJ]
 

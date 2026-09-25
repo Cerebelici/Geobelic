@@ -1,6 +1,6 @@
 # Conflicts
 
-Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sources.md).
+Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 
 Recorded so later edits do not “fix” a file to match a sentence, or the reverse, without noticing.
 
@@ -14,7 +14,12 @@ Recorded so later edits do not “fix” a file to match a sentence, or the reve
 | Waste XML | Label type `rectangle` [S-RULES] | No `<box>` in the example [S-EX] | Confirm the box tag on a draft import. |
 | `measurements.csv` | Required, described in one sentence [S-DESC] | No template | Scoring of the numbers uses Marcaj. The CSV is what the jury reads. Design columns, then record them in the README. |
 | Source `UNITTYPE` | — | GDAL metadata says metre [S-GEO] | CRS is EPSG:4326 degrees. |
+| “Exclusion” | The description calls `unassessable` the exclusion attribute, and the visual guide says to flag unreadable areas for exclusion [S-DESC] [S-VISUAL] | The rules still require the object, with value `unassessable` [S-RULES] | Draw the object. `unassessable` is scored like any other value. Dropping it is a miss. |
+| Visual-guide `interrow_id` | Slide 03 calls an inter-row a passage axis with `interrow_id` [S-VISUAL] | Label `interrow_area` is a polygon. There is no `interrow_id`. Centre lines are not uploaded [S-RULES] | Ignore the slide attribute. |
+| Visual-guide export | Slide 09 lists a final annotation export as a deliverable [S-VISUAL] | Organizers export Marcaj at the deadline. Teams do not upload an annotation file for scoring [S-MARCAJ] | Export only for measurements and the UI. |
+| Visual-guide tiling | Slide 01 says to split the orthomosaic and assign tile ids [S-VISUAL] | The 311 tiles are already named. Matching is by file name [S-DESC] | Do not rename or recompress. Retile only for training. |
+| Description prose `bare soil` | One sentence in the brief writes “bare soil” with a space [S-DESC] | The attribute table and the rules use `bare_soil` [S-DESC] [S-RULES] | The token is `bare_soil`. |
 
-Operational traps already stated by the organizers, repeated because they are easy to miss: publishing early; unsubmitted jobs; renamed tiles; IDs restarted on each tile; annotating Sireț3 outside Marcaj; false canopies on empty tiles; a route that cuts through canopies or forbidden ground. [S-DESC] [S-MARCAJ] [S-RULES]
+Operational traps already stated by the organizers, repeated because they are easy to miss: publishing early; unsubmitted jobs; renamed tiles; IDs restarted on each tile; annotating Sireț3 outside Marcaj; false canopies on empty tiles; a route that cuts through canopies or forbidden ground; using **Change** on the Labeling card or **Delete** after upload. [S-DESC] [S-MARCAJ] [S-RULES]
 
-Related: [Spatial](spatial.md) · [Marcaj](marcaj.md) · [Submission](submission.md)
+Related: [Spatial](spatial.md) · [Marcaj](marcaj.md) · [Submission](submission.md) · [Visual guide](visual-guide.md)

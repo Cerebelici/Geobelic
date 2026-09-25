@@ -1,6 +1,6 @@
 # Annotation
 
-Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sources.md).
+Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 
 Version 1.0, 25 September 2026. The scoring reference follows these rules exactly. Label and attribute names are **lowercase** and must match character for character. [S-RULES]
 
@@ -18,7 +18,9 @@ Allowed values: [S-RULES] [S-DESC]
 - `row_structure`: `regular` · `disrupted` · `unassessable`
 - `interrow_cover`: `bare_soil` · `vegetation` · `mixed` · `unassessable`
 
-`unassessable` is a real answer. It is scored like any other value. It is used when the row or the ground cannot be made out (deep shadow, overexposure, weeds taller than the vines, canopy closed over the inter-row). [S-RULES]
+`unassessable` is a real answer. The challenge description calls it the **exclusion attribute**: it marks a row or an inter-row that cannot be read, and it is scored like any other value. It does not mean the object is left out. A missing object is an error. Use it when the row or the ground cannot be made out (deep shadow, overexposure, weeds taller than the vines, canopy closed over the inter-row). [S-DESC] [S-RULES]
+
+For the grower, `row_structure` shows where vines are missing, and `interrow_cover` shows which inter-rows need mowing or tilling. [S-RULES]
 
 ID strings are chosen by the team (`V03`, `north`, `7` are all legal). Scoring compares grouping, not the strings. Recommended pattern: block `V01`, `V02`, … and row `<vineyard_id>-R<nn>` such as `V03-R017`, numbered across the whole block. [S-RULES]
 
@@ -111,5 +113,15 @@ Inter-row centre lines. Roads, tracks, the supplied passages, forbidden zones, a
 Annotate in pixels in Marcaj. The platform keeps the georeferencing and scoring converts to metres. Tiles are 2048 × 2048 px, 2.5 cm/px, 51.2 m on the ground, EPSG:32635. [S-RULES]
 
 CVAT image coordinates: origin at the top-left, `x` to the right, `y` downward. Confirmed by the example polylines, which run to `x = 2048` and `y = 0` or `y = 2048`. [S-EX]
+
+## Checklist before submitting a job
+
+From the rules, section 8. [S-RULES]
+
+- No polygon covers more than one plant, and no canopy is drawn on a tree or an orchard crown.
+- Every row has one polyline per tile, through its gaps, with the same `row_id` on both sides of a tile edge.
+- No inter-row polygon overlaps a canopy or runs past the row ends.
+- Every object has `vineyard_id`. Every row has `row_id` and `row_structure`. Every inter-row has `interrow_cover`.
+- Every tile is annotated or marked **No objects in this frame**, and every job is submitted.
 
 Related: [Scoring](scoring.md) · [Marcaj](marcaj.md) · [Examples](examples.md) · [Spatial](spatial.md)

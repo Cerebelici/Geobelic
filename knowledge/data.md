@@ -1,8 +1,8 @@
 # Data
 
-Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sources.md).
+Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 
-Local path (not committed): `/Users/chirill/Downloads/assets_for_participants`. [S-README]
+Committed copy of the participant package: `assets/` at the repository root. The source orthomosaic is Git LFS. The same drop was first read from `/Users/chirill/Downloads/assets_for_participants`. [S-README]
 
 | Folder | File | Role |
 |---|---|---|
@@ -16,6 +16,7 @@ Local path (not committed): `/Users/chirill/Downloads/assets_for_participants`. 
 | `03_docs/` | `Vineyard_AI_Field_Challenge_description.pdf` | Tasks, submission, rules, scoring. 5 pages. |
 | `03_docs/` | `Vineyard_AI_annotation_rules.pdf` | Labels, attributes, cases. v1.0, 8 pages. |
 | `03_docs/` | `Marcaj_quick_start_for_teams.pdf` | Sign-in through submit. v1.0, 6 pages. |
+| `03_docs/` | `Marcaj_Vineyard_AI_Visual_Journey.pdf` | Illustrative 9-page workflow. Not a rule. [S-VISUAL] |
 | `04_source/` | `siret3_source_orthomosaic_EPSG4326.tif` | Full original mosaic. Training only. |
 | `05_examples/` | `siret3_examples_cvat.zip` | Two annotated tiles in the upload format. **Not scored.** |
 | `05_examples/` | `preview_siret3_r021_c012.jpg`, `preview_siret3_r006_c004.jpg` | Preview renders of those annotations. |
@@ -41,7 +42,9 @@ Named open datasets (names and counts are from the brief): [S-DESC] Licences and
 
 ## Licence
 
-Sireț3 imagery: **CC BY 4.0**. Credit 3DATA COLLECT / OpenAerialMap, contributors to the Open Imagery Network. Challenge tiles are that mosaic, reprojected to EPSG:32635 and cut. Keep the attribution when the imagery is reused. [S-README]
+Sireț3 imagery: **CC BY 4.0**. Credit 3DATA COLLECT / OpenAerialMap, contributors to the Open Imagery Network. The brief states that this licence permits reuse, adaptation, and redistribution, including commercial use, subject to its terms. Challenge tiles are that mosaic, reprojected to EPSG:32635 and cut. Keep the attribution when the imagery is reused. [S-README] [S-DESC]
+
+The brief also lists the tiles as “ZIP and cloud link” and the source mosaic as “cloud link / OpenAerialMap”. No URL for either link is in the package, and a public OpenAerialMap item URL was not found on 2026-09-25. [S-DESC] [S-GEO]
 
 Route layers contain OpenStreetMap data, © OpenStreetMap contributors, ODbL. [S-README]
 

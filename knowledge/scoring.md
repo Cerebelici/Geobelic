@@ -1,6 +1,6 @@
 # Scoring
 
-Part of the [Sireț3 knowledge base](../KNOWLEDGE_BASE.md). Cite [sources](sources.md).
+Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 
 85% automatic metrics, 15% expert engineering. Scoring uses a **hidden subset** of the 311 tiles, including tiles with no vineyard. Annotate all of them. Matching is one-to-one: a duplicate is a false positive; a miss stays an error. [S-DESC]
 
