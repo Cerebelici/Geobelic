@@ -1,1 +1,35 @@
+# Operating System & IDE
 .DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+.venv/
+env/
+venv/
+
+# Training Dataset & Runs (Large Files - Do NOT commit)
+dataset/
+runs/
+models/
+*.cache
+
+# Heavy Imagery & Mosaics (>100MB / forbidden in repo)
+assets/01_tiles/*.zip
+assets/04_source/*
+assets/04_source/siret3_source_orthomosaic_EPSG4326.tif
+
+# Pretrained base weights (keep only fine-tuned best.pt)
+*.pt
+!weights/best.pt
+
+# Local temporary dumps
+output/
+annotations*.xml
+coordinates*.json
+assets/04_source/siret3_source_orthomosaic_EPSG4326.tif
+assets/04_source/siret3_source_orthomosaic_EPSG4326.tif
