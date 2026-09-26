@@ -49,6 +49,8 @@ The participant package is in `assets/` at the repository root. The source ortho
 | Where a number came from | [Sources](sources.md) |
 | What we decided, and what we have not | [Solution](solution.md) |
 | Experiments still to run | [Research](research.md) |
+| Which trainer to use on ICAERUS | [Training stack](training-stack.md) |
+| How to adapt ICAERUS and Riseholme masks | [Mask adaptation](mask-adaptation.md) |
 | Terms | [Glossary](glossary.md) |
 
 ## How to extend
