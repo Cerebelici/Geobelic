@@ -1,8 +1,15 @@
 """
 Unit tests for grid georeferencing and CVAT XML serialization.
 """
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 import xml.etree.ElementTree as ET
+
 from src.spatial.grid import (
     parse_tile_indices,
     tile_upper_left,

@@ -45,13 +45,13 @@ def parse_args():
         "--conf",
         type=float,
         default=None,
-        help="Confidence threshold (default: 0.20 for YOLO, 0.05 for RF-DETR)",
+        help="Confidence threshold (default: 0.28 for YOLO, 0.05 for RF-DETR)",
     )
     parser.add_argument(
         "--imgsz",
         type=int,
-        default=1024,
-        help="Image size for inference (default: 1024)",
+        default=2048,
+        help="Image size for inference (default: 2048 native resolution)",
     )
     parser.add_argument(
         "--vineyard-id",
@@ -88,7 +88,7 @@ def main():
         return
 
     is_rfdetr = str(args.weights).endswith(".pth") or "rfdetr" in str(args.weights).lower()
-    conf = args.conf if args.conf is not None else (0.05 if is_rfdetr else 0.20)
+    conf = args.conf if args.conf is not None else (0.05 if is_rfdetr else 0.28)
 
     print("=" * 60)
     print("Marcaj CVAT 1.1 XML Generator")

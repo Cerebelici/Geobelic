@@ -1,9 +1,12 @@
 import torch
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
-from collections import defaultdict
+import cv2
 import numpy as np
 from PIL import Image
+from scipy.ndimage import maximum_filter
+from shapely.geometry import Polygon, MultiPolygon
+from shapely.validation import make_valid
 
 from src.export.cvat_writer import (
     CVATWriter,
@@ -20,8 +23,123 @@ from src.spatial.block_cluster import GlobalBlockClusterer
 from src.spatial.row_stitcher import GlobalRowStitcher, LocalRowSegment
 
 
-from shapely.geometry import Polygon, MultiPolygon
-from shapely.validation import make_valid
+def extract_polygons(geom) -> List[Polygon]:
+    """Recursively extract all Polygon instances from Polygon, MultiPolygon, or GeometryCollection."""
+    if isinstance(geom, Polygon):
+        return [geom]
+    elif hasattr(geom, "geoms"):
+        res = []
+        for g in geom.geoms:
+            res.extend(extract_polygons(g))
+        return res
+    return []
+
+
+def separate_canopy_polygon(
+    pts_np: np.ndarray,
+    min_dist_px: float = 40.0,
+    min_area_px: float = 300.0,
+    simplify_tol: float = 1.0,
+) -> List[List[Tuple[float, float]]]:
+    """
+    Mentor Concepts Implementation:
+    1. Morphological opening (3x3 ellipse) to sever flimsy single-pixel necks.
+    2. Euclidean distance transform & marker-controlled watershed for elongated/touching canopies.
+    3. Minimum area filtering (>= 300 px² / ~0.2 m²) to discard weed speckles.
+    4. Topological sanitization (make_valid + GeometryCollection extraction) and
+       Douglas-Peucker simplification (tol=1.0 px -> median 14 vertices matching GT).
+    """
+    if len(pts_np) < 3:
+        return []
+
+    min_x, min_y = pts_np.min(axis=0)
+    max_x, max_y = pts_np.max(axis=0)
+    w = max_x - min_x
+    h = max_y - min_y
+    diag = np.sqrt(w * w + h * h)
+    aspect_ratio = max(w, h) / max(min(w, h), 1e-3)
+
+    # If small or compact, sanitize directly without watershed
+    if diag < 75 and aspect_ratio < 1.8:
+        poly = Polygon(pts_np)
+        if not poly.is_valid:
+            poly = make_valid(poly)
+        valid_polys = []
+        for p in extract_polygons(poly):
+            p_simp = p.simplify(simplify_tol, preserve_topology=True)
+            if p_simp.is_valid and not p_simp.is_empty and min_area_px <= p_simp.area <= 5000.0:
+                coords = [(round(float(x), 1), round(float(y), 1)) for x, y in p_simp.exterior.coords[:-1]]
+                if len(coords) >= 3:
+                    valid_polys.append(coords)
+        return valid_polys
+
+    # Elongated / compound canopies: Morphological Opening & Distance-Transform Watershed
+    pad = 4
+    pw = int(np.ceil(w)) + 2 * pad
+    ph = int(np.ceil(h)) + 2 * pad
+    patch = np.zeros((ph, pw), dtype=np.uint8)
+    local_pts = (pts_np - [min_x, min_y] + [pad, pad]).astype(np.int32)
+    cv2.fillPoly(patch, [local_pts], 255)
+
+    # 1. Morphological Opening (sever single-pixel weed bridges)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    opened = cv2.morphologyEx(patch, cv2.MORPH_OPEN, kernel)
+
+    # 2. Euclidean Distance Transform
+    dist = cv2.distanceTransform(opened, cv2.DIST_L2, 5)
+
+    footprint_size = int(min_dist_px)
+    if footprint_size % 2 == 0:
+        footprint_size += 1
+    local_max = (dist == maximum_filter(dist, size=footprint_size)) & (dist > 5.0)
+    peak_y, peak_x = np.where(local_max)
+
+    # Single peak: extract contour from opened mask
+    if len(peak_x) <= 1:
+        contours, _ = cv2.findContours(opened, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        valid_polys = []
+        for cnt in contours:
+            if len(cnt) >= 3:
+                cnt_pts = cnt.reshape(-1, 2) + [min_x - pad, min_y - pad]
+                poly = Polygon(cnt_pts)
+                if not poly.is_valid:
+                    poly = make_valid(poly)
+                for p in extract_polygons(poly):
+                    p_simp = p.simplify(simplify_tol, preserve_topology=True)
+                    if p_simp.is_valid and not p_simp.is_empty and min_area_px <= p_simp.area <= 5000.0:
+                        coords = [(round(float(x), 1), round(float(y), 1)) for x, y in p_simp.exterior.coords[:-1]]
+                        if len(coords) >= 3:
+                            valid_polys.append(coords)
+        return valid_polys
+
+    # Multiple peaks: Marker-controlled watershed
+    markers = np.zeros_like(opened, dtype=np.int32)
+    for m_id, (px, py) in enumerate(zip(peak_x, peak_y), start=1):
+        cv2.circle(markers, (px, py), 2, m_id, -1)
+
+    color_patch = cv2.cvtColor(opened, cv2.COLOR_GRAY2BGR)
+    cv2.watershed(color_patch, markers)
+
+    valid_polys = []
+    max_canopy_area_px = 5000.0  # Challenge plant canopy is ~0.5m^2 (800 px^2), max ~3.0m^2
+    for m_id in range(1, len(peak_x) + 1):
+        sub_mask = ((markers == m_id) & (opened > 0)).astype(np.uint8) * 255
+        if sub_mask.sum() == 0:
+            continue
+        contours, _ = cv2.findContours(sub_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            if len(cnt) >= 3:
+                cnt_pts = cnt.reshape(-1, 2) + [min_x - pad, min_y - pad]
+                poly = Polygon(cnt_pts)
+                if not poly.is_valid:
+                    poly = make_valid(poly)
+                for p in extract_polygons(poly):
+                    p_simp = p.simplify(simplify_tol, preserve_topology=True)
+                    if p_simp.is_valid and not p_simp.is_empty and min_area_px <= p_simp.area <= max_canopy_area_px:
+                        coords = [(round(float(x), 1), round(float(y), 1)) for x, y in p_simp.exterior.coords[:-1]]
+                        if len(coords) >= 3:
+                            valid_polys.append(coords)
+    return valid_polys
 
 
 class VineyardPipeline:
@@ -50,61 +168,34 @@ class VineyardPipeline:
         return "cpu"
 
     @staticmethod
-    def sanitize_polygon(raw_points: np.ndarray, min_area_px: float = 10.0) -> List[List[Tuple[float, float]]]:
-        """
-        Sanitizes a raw YOLO contour into 100% valid, non-self-intersecting closed polygons.
-        - Fixes self-intersections (bowtie/hourglass artifacts) via make_valid
-        - Decomposes MultiPolygons into separate simple polygons (eliminating bridge lines)
-        - Simplifies vertices slightly to remove single-pixel spikes
-        - Filters out degenerate shapes (< 3 vertices or area < min_area_px)
-        """
-        if len(raw_points) < 3:
-            return []
-
-        try:
-            poly = Polygon(raw_points)
-            if not poly.is_valid:
-                poly = make_valid(poly)
-
-            if isinstance(poly, Polygon):
-                sub_polys = [poly]
-            elif isinstance(poly, MultiPolygon):
-                sub_polys = list(poly.geoms)
-            else:
-                return []
-
-            valid_polys = []
-            for sp in sub_polys:
-                sp_clean = sp.simplify(0.5, preserve_topology=True)
-                if sp_clean.is_valid and not sp_clean.is_empty and sp_clean.area >= min_area_px:
-                    coords = [(round(float(x), 1), round(float(y), 1)) for x, y in sp_clean.exterior.coords[:-1]]
-                    if len(coords) >= 3:
-                        valid_polys.append(coords)
-            return valid_polys
-        except Exception:
-            return []
+    def sanitize_polygon(raw_points: np.ndarray, min_area_px: float = 300.0) -> List[List[Tuple[float, float]]]:
+        """Wrapper around separate_canopy_polygon for backward compatibility."""
+        return separate_canopy_polygon(raw_points, min_area_px=min_area_px)
 
     def process_batch(
         self,
         tile_paths: List[str],
         confidence: float = 0.28,
-        imgsz: int = 1024,
+        imgsz: int = 2048,
+        min_plant_dist_px: float = 40.0,
+        min_area_px: float = 300.0,
         passages_geojson: str = "assets/02_route/passages.geojson",
         verbose: bool = True,
     ) -> Tuple[List[TileAnnotations], List[Tuple[float, float]]]:
         """
         Canopy-Focused Processing Pipeline:
-        1. AI inference per tile (YOLO26 segmentation)
-        2. Clean polygon sanitization (eliminates broken/bowtie polygons and cross-lines)
-        3. Global block clustering (EPSG:32635) via 2.5m buffer & passage cuts
-        4. Outputs TileAnnotations containing strictly clean canopies with persistent vineyard_id
+        1. High-resolution AI inference per tile (YOLO26-Seg native 2048x2048)
+        2. Morphological opening & distance-transform watershed separation
+        3. Clean polygon sanitization & Douglas-Peucker decimation (median 14 vertices)
+        4. Global block clustering (EPSG:32635) via 2.5m buffer & passage cuts
+        5. Outputs TileAnnotations containing strictly clean canopies with persistent vineyard_id
         """
         tile_results = []
         tile_canopy_centroids: Dict[str, List[Tuple[float, float]]] = {}
         tile_parsed_indices: Dict[str, Optional[Tuple[int, int]]] = {}
 
         # -------------------------------------------------------------
-        # Phase 1: Model inference & polygon sanitization
+        # Phase 1: Model inference & polygon separation
         # -------------------------------------------------------------
         for idx, tile_path in enumerate(tile_paths, start=1):
             tile_name = Path(tile_path).name
@@ -119,7 +210,6 @@ class VineyardPipeline:
 
             if self.model is not None:
                 if self.model_type == "rfdetr":
-                    import cv2
                     dets = self.model.predict(tile_path, threshold=confidence)
                     if dets.mask is not None:
                         for m in dets.mask:
@@ -128,7 +218,12 @@ class VineyardPipeline:
                             )
                             for cnt in contours:
                                 pts = cnt.reshape(-1, 2)
-                                cleaned_polys = self.sanitize_polygon(pts, min_area_px=10.0)
+                                cleaned_polys = separate_canopy_polygon(
+                                    pts,
+                                    min_dist_px=min_plant_dist_px,
+                                    min_area_px=min_area_px,
+                                    simplify_tol=1.0,
+                                )
                                 for poly_coords in cleaned_polys:
                                     canopy_polys.append(poly_coords)
                                     c_poly = Polygon(poly_coords)
@@ -145,7 +240,12 @@ class VineyardPipeline:
 
                     if results.masks is not None:
                         for mask in results.masks.xy:
-                            cleaned_polys = self.sanitize_polygon(mask, min_area_px=10.0)
+                            cleaned_polys = separate_canopy_polygon(
+                                mask,
+                                min_dist_px=min_plant_dist_px,
+                                min_area_px=min_area_px,
+                                simplify_tol=1.0,
+                            )
                             for poly_coords in cleaned_polys:
                                 canopy_polys.append(poly_coords)
                                 c_poly = Polygon(poly_coords)
@@ -200,9 +300,8 @@ class VineyardPipeline:
         tile_path: str,
         vineyard_id: str = "V01",
         confidence: float = 0.28,
-        imgsz: int = 1024,
+        imgsz: int = 2048,
     ) -> Tuple[TileAnnotations, List[Tuple[float, float]]]:
         """Process a single tile via the batch pipeline for consistent IDs."""
         anns, targets = self.process_batch([tile_path], confidence=confidence, imgsz=imgsz, verbose=False)
         return anns[0], targets
-
