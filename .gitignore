@@ -38,8 +38,8 @@ assets/04_source/siret3_source_orthomosaic_EPSG4326.tif
 # Pretrained base weights (keep only the fine-tuned detectors)
 *.pt
 *.pth
-!weights/best.pt
-!waste/best.pt
+weights/
+
 
 # Local temporary dumps
 output/
