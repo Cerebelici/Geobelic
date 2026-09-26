@@ -6,8 +6,14 @@ and inter-row polygons, and produces the final XML. Zero image files generated.
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import List
+
+# Ensure repository root is on sys.path so script can be invoked from anywhere
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from src.pipeline import VineyardPipeline
 from src.export.cvat_writer import CVATWriter
@@ -38,8 +44,8 @@ def parse_args():
     parser.add_argument(
         "--conf",
         type=float,
-        default=0.28,
-        help="Confidence threshold for canopy detection (default: 0.28)",
+        default=None,
+        help="Confidence threshold (default: 0.20 for YOLO, 0.05 for RF-DETR)",
     )
     parser.add_argument(
         "--imgsz",
@@ -81,11 +87,15 @@ def main():
         print(f"No image files found in {source_path}")
         return
 
+    is_rfdetr = str(args.weights).endswith(".pth") or "rfdetr" in str(args.weights).lower()
+    conf = args.conf if args.conf is not None else (0.05 if is_rfdetr else 0.20)
+
     print("=" * 60)
     print("Marcaj CVAT 1.1 XML Generator")
     print(f"Model Weights: {args.weights}")
+    print(f"Architecture:  {'RF-DETR-Seg' if is_rfdetr else 'YOLO-Seg'}")
     print(f"Source:        {args.source} ({len(tile_files)} tiles)")
-    print(f"Confidence:    {args.conf} | ImgSz: {args.imgsz}")
+    print(f"Confidence:    {conf} | ImgSz: {args.imgsz}")
     print(f"Output XML:    {args.output}")
     print("=" * 60)
 
@@ -95,42 +105,22 @@ def main():
 
     raw_coordinates_dump = {}
 
-    for idx, tile_file in enumerate(tile_files, start=1):
-        tile_ann, targets = pipeline.process_tile(
-            tile_path=str(tile_file),
-            vineyard_id=args.vineyard_id,
-            confidence=args.conf,
-            imgsz=args.imgsz,
-        )
+    tile_paths = [str(f) for f in tile_files]
+    tile_annotations, targets = pipeline.process_batch(
+        tile_paths=tile_paths,
+        confidence=conf,
+        imgsz=args.imgsz,
+        verbose=True,
+    )
+
+    for tile_ann in tile_annotations:
         writer.add_tile(tile_ann)
-
-        print(
-            f"[{idx}/{len(tile_files)}] {tile_file.name}: "
-            f"{len(tile_ann.canopies)} canopies, "
-            f"{len(tile_ann.rows)} rows, "
-            f"{len(tile_ann.interrows)} inter-rows, "
-            f"{len(targets)} gap targets"
-        )
-
         if args.save_json:
-            raw_coordinates_dump[tile_file.name] = {
-                "canopies": [c.points for c in tile_ann.canopies],
-                "rows": [
-                    {
-                        "row_id": r.row_id,
-                        "structure": r.row_structure,
-                        "points": r.points,
-                    }
-                    for r in tile_ann.rows
-                ],
-                "interrows": [
-                    {
-                        "cover": ir.interrow_cover,
-                        "points": ir.points,
-                    }
-                    for ir in tile_ann.interrows
-                ],
-                "gaps": targets,
+            raw_coordinates_dump[tile_ann.image_name] = {
+                "canopies": [
+                    {"points": c.points, "vineyard_id": c.vineyard_id}
+                    for c in tile_ann.canopies
+                ]
             }
 
     # Write final CVAT 1.1 XML

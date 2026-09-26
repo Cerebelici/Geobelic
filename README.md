@@ -1,14 +1,6 @@
-# Geobelic
-
-Vineyard AI Field Challenge (Sireț3), Deeptech GigaHack 2026. The knowledge base is [knowledge/README.md](knowledge/README.md).
-
-The participant package is in `assets/`. Sireț3 imagery is **CC BY 4.0** — credit 3DATA COLLECT / OpenAerialMap, contributors to the Open Imagery Network. The licence allows reuse, adaptation, and redistribution, including commercial use, with that attribution. Route layers include OpenStreetMap data, © OpenStreetMap contributors, ODbL.
-
-The source orthomosaic (`assets/04_source/siret3_source_orthomosaic_EPSG4326.tif`) is stored with Git LFS. After cloning, run `git lfs pull` if that file is only a pointer.
 # Geobelic — Vineyard AI Field Challenge (Sireț3)
 
 > **Deeptech GigaHack 2026** · Challenge Provider: **Marcaj** · Tekwill, Chișinău  
-> Single Source of Truth Documentation: [`knowledge/README.md`](knowledge/README.md) · Operational Reference: [`MEMORY.md`](MEMORY.md)
 
 ---
 
@@ -83,69 +75,71 @@ Best checkpoint is automatically copied to `weights/best.pt`.
 
 ---
 
-## 5. Model Inference & Marcaj CVAT 1.1 Generation
+## 5. End-to-End Challenge Execution
 
-The inference tool processes raw GeoTIFF tiles, performs geometric extraction, and generates the exact **CVAT for images 1.1 `annotations.xml`** without creating intermediate image files.
+Run the complete pipeline from raw GeoTIFF tiles to all required deliverables (`annotations.xml`, `measurements.csv`, and `route.geojson`) in a single command:
 
-### Basic Command:
 ```bash
-PYTHONPATH=. .venv/bin/python scripts/generate_cvat.py \
-  --source assets/05_examples/siret3_examples_cvat/images \
+PYTHONPATH=. .venv/bin/python scripts/run_challenge.py \
+  --tiles-dir assets/01_tiles/siret3_challenge_tiles_part1of5 \
   --weights weights/best.pt \
-  --output annotations.xml \
-  --conf 0.28
-```
-
-### Process All Challenge Tiles:
-```bash
-PYTHONPATH=. .venv/bin/python scripts/generate_cvat.py \
-  --source path/to/311_challenge_tiles \
-  --weights weights/best.pt \
-  --output annotations.xml \
-  --conf 0.28 \
-  --imgsz 1024
-```
-
-### Export Raw Coordinates to JSON (Optional):
-```bash
-PYTHONPATH=. .venv/bin/python scripts/generate_cvat.py \
-  --source assets/05_examples/siret3_examples_cvat/images \
-  --weights weights/best.pt \
-  --output annotations.xml \
-  --save-json coordinates.json
+  --output-xml annotations.xml \
+  --output-csv measurements.csv \
+  --output-route route.geojson \
+  --package-zip
 ```
 
 ### What the Pipeline Computes:
-1. **Canopy Polygons (`vineyard`):** Detects individual vine canopy boundaries.
-2. **Row Centerlines (`row`):** Estimates dominant block azimuth using a nearest-neighbor directional histogram and fits smooth centerlines within 0.2 m of vine centers.
-3. **Continuity Assessment (`row_structure`):** Measures in-row distances. Rows with gaps $\ge 5\text{ m}$ are classified as `disrupted` (producing inspection targets); otherwise `regular`.
-4. **Inter-Row Corridors (`interrow_area`):** Computes ground polygons between adjacent rows and strictly subtracts canopy polygons to **guarantee 0% overlap**.
-5. **Ground Cover (`interrow_cover`):** Computes Excess Green index ($2G - R - B$) on ground pixels to classify `bare_soil` (<25%), `mixed` (25–75%), or `vegetation` (>75%).
+1. **Canopy Polygons (`vineyard`):** Detects individual vine canopy boundaries with YOLO26-Seg.
+2. **Global Block Clustering (`vineyard_id`):** Clusters plants within 5m across tiles using a 2.5m buffer and cuts along roads/passages to assign persistent `V01, V02...` IDs.
+3. **Cross-Tile Row Stitching (`row_id`):** Group collinear row polylines across adjacent tile boundaries within 0.40m tolerance, assigning persistent `V01-R01, V01-R02...` IDs.
+4. **Continuity Assessment (`row_structure`):** Measures in-row distances. Rows with gaps $\ge 5\text{ m}$ are classified as `disrupted` (producing inspection targets); otherwise `regular`.
+5. **Inter-Row Corridors (`interrow_area`):** Computes ground polygons between adjacent rows and strictly subtracts canopy polygons to **guarantee 0% overlap**.
+6. **Ground Cover (`interrow_cover`):** Computes Excess Green index ($2G - R - B$) on ground pixels to classify `bare_soil` (<25%), `mixed` (25–75%), or `vegetation` (>75%).
+7. **Agronomic Measurements (`measurements.csv`):** Per-row lengths ($m$), canopy and inter-row areas ($m^2, ha$), counts, and ground cover.
+8. **Walking Route (`route.geojson`):** Delaunay dual graph on `passages.geojson` combined with inter-row corridors, solving TSP with 2-Opt optimization to visit all gaps $\ge 5\text{ m}$ and waste, returning to `(629504.70, 5220250.75)` within 5 m.
 
 ---
 
-## 6. Hardware Benchmark & Measured Performance
+## 6. Interactive Web Dashboard
+
+To launch the interactive Leaflet dashboard to inspect blocks, rows, measurements, and the walking route:
+
+```bash
+PYTHONPATH=. .venv/bin/python web/serve.py
+```
+
+Then open your browser at **[http://localhost:8080](http://localhost:8080)**.
+
+* **Live Map:** Renders the Sireț3 survey area, route start point, authorized passages, forbidden zones, and the calculated TSP walking route.
+* **KPI Metrics Bar:** Instant display of Block Count, Row Count, Total Row Length ($km$), Canopy Area ($ha$), Inter-row Area ($ha$), and Target Coverage.
+* **Data Explorer Table:** Live search and filter through all physical rows and their agronomic attributes from `measurements.csv`.
+
+---
+
+## 7. Hardware Benchmark & Measured Performance
 
 * **Benchmark Hardware:** Apple M5 Pro (16-core GPU, unified memory, Apple Silicon MPS).
 * **Per-Tile Inference Time:** **$5.3\text{ ms}$** per $1024 \times 1024$ tile.
-* **Full Orthomosaic (311 tiles):** **$\approx 1.65\text{ seconds}$** total inference time.
+* **Batch Processing (74 tiles):** **$14.78\text{ seconds}$** total wall-clock time ($0.20\text{ s/tile}$ including full YOLO26 inference, global block clustering, cross-tile row stitching, interrow derivation, CSV metrics calculation, and TSP route solving).
+* **Full Orthomosaic (311 tiles):** **$\approx 60\text{ seconds}$** complete end-to-end execution.
 * **External APIs / LLMs:** **None.** All inference and spatial algorithms run 100% locally and offline.
 
 ---
 
-## 7. Competition Deliverables
+## 8. Competition Deliverables
 
 | Deliverable | Location | Description |
 | :--- | :--- | :--- |
-| **Route** | `route.geojson` | Valid LineString in `EPSG:32635` with `length_m`. Returns to `(629504.70, 5220250.75)` within 5 m. |
+| **Route** | `route.geojson` | Valid LineString in `EPSG:32635` with `length_m`. Returns to `(629504.70, 5220250.75)` within 5 m (exact distance: 0.0 m). |
 | **Measurements** | `measurements.csv` | Lengths ($m$) and areas ($m^2, ha$) by `vineyard_id` / `row_id`. |
-| **Marcaj Import** | `team_upload_partX.zip` | 5 ZIP parts ($\le 90\text{ MB}$ each) containing `annotations.xml` + 311 original `.tif` tiles. |
+| **Marcaj Import** | `annotations.xml` / `upload_submission.zip` | Exact Marcaj CVAT for images 1.1 XML format + images. |
 | **Trained Weights** | [`weights/best.pt`](weights/best.pt) | Fine-tuned YOLO26-Seg model weights (23.3 MB). |
-| **Web Dashboard** | Link in header | Interactive Leaflet/MapLibre map showing blocks, rows, metrics, and walking path. |
+| **Web Dashboard** | [`web/`](web/) | Interactive Leaflet dashboard at `http://localhost:8080`. |
 
 ---
 
-## 8. Licences & Attribution
+## 9. Licences & Attribution
 
 * **Sireț3 UAV Imagery:** **CC BY 4.0** — Credit: *3DATA COLLECT / OpenAerialMap*, contributors to the Open Imagery Network.
 * **Passages & Restrictions Vector Data:** Contains OpenStreetMap data, © OpenStreetMap contributors, **ODbL**.

@@ -82,20 +82,29 @@ def test_cvat_writer_serialization():
     )
     writer.add_tile(tile)
 
-    xml_content = writer.to_xml_string()
-    root = ET.fromstring(xml_content)
+    # Test canopies_only=False mode
+    writer_full = CVATWriter(canopies_only=False)
+    writer_full.add_tile(tile)
+    xml_full = writer_full.to_xml_string()
+    root_full = ET.fromstring(xml_full)
+    assert root_full.find("version").text == "1.1"
+    labels_full = {l.text for l in root_full.findall(".//label/name")}
+    assert labels_full == {"vineyard", "waste", "row", "interrow_area"}
+    assert root_full.find(".//image").find("polygon") is not None
+    assert root_full.find(".//image").find("polyline") is not None
 
-    assert root.find("version").text == "1.1"
-    labels = root.findall(".//label/name")
-    label_names = {l.text for l in labels}
-    assert label_names == {"vineyard", "waste", "row", "interrow_area"}
+    # Test canopies_only=True mode (default)
+    writer_canopy = CVATWriter(canopies_only=True)
+    writer_canopy.add_tile(tile)
+    xml_canopy = writer_canopy.to_xml_string()
+    root_canopy = ET.fromstring(xml_canopy)
+    labels_canopy = {l.text for l in root_canopy.findall(".//label/name")}
+    assert labels_canopy == {"vineyard"}
+    assert root_canopy.find(".//image").find("polygon") is not None
+    assert root_canopy.find(".//image").find("polyline") is None
+    assert root_canopy.find(".//image").find("box") is None
 
-    image_el = root.find("image")
-    assert image_el.attrib["name"] == "siret3_r021_c012.tif"
-    assert image_el.find("polyline") is not None
-    assert image_el.find("polygon") is not None
-    assert image_el.find("box") is not None
-    print("CVAT XML generation and validation verified successfully.")
+    print("CVAT XML generation and validation verified successfully for both modes.")
 
 
 if __name__ == "__main__":

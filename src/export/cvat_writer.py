@@ -70,8 +70,9 @@ class CVATWriter:
 
     TASK_NAME = "Vineyard AI Field Challenge"
 
-    def __init__(self, task_name: Optional[str] = None):
+    def __init__(self, task_name: Optional[str] = None, canopies_only: bool = True):
         self.task_name = task_name or self.TASK_NAME
+        self.canopies_only = canopies_only
         self.tiles: List[TileAnnotations] = []
 
     def add_tile(self, tile: TileAnnotations):
@@ -90,7 +91,7 @@ class CVATWriter:
         name.text = self.task_name
         labels = ET.SubElement(task, "labels")
 
-        # 1. vineyard label
+        # 1. vineyard label (always present)
         lbl_v = ET.SubElement(labels, "label")
         ET.SubElement(lbl_v, "name").text = "vineyard"
         ET.SubElement(lbl_v, "type").text = "polygon"
@@ -102,54 +103,55 @@ class CVATWriter:
         ET.SubElement(a, "default_value").text = ""
         ET.SubElement(a, "values").text = ""
 
-        # 2. waste label
-        lbl_w = ET.SubElement(labels, "label")
-        ET.SubElement(lbl_w, "name").text = "waste"
-        ET.SubElement(lbl_w, "type").text = "rectangle"
-        attr_w = ET.SubElement(lbl_w, "attributes")
-        a = ET.SubElement(attr_w, "attribute")
-        ET.SubElement(a, "name").text = "vineyard_id"
-        ET.SubElement(a, "mutable").text = "False"
-        ET.SubElement(a, "input_type").text = "text"
-        ET.SubElement(a, "default_value").text = ""
-        ET.SubElement(a, "values").text = ""
-
-        # 3. row label
-        lbl_r = ET.SubElement(labels, "label")
-        ET.SubElement(lbl_r, "name").text = "row"
-        ET.SubElement(lbl_r, "type").text = "polyline"
-        attr_r = ET.SubElement(lbl_r, "attributes")
-        for attr_name in ["vineyard_id", "row_id"]:
-            a = ET.SubElement(attr_r, "attribute")
-            ET.SubElement(a, "name").text = attr_name
+        if not self.canopies_only:
+            # 2. waste label
+            lbl_w = ET.SubElement(labels, "label")
+            ET.SubElement(lbl_w, "name").text = "waste"
+            ET.SubElement(lbl_w, "type").text = "rectangle"
+            attr_w = ET.SubElement(lbl_w, "attributes")
+            a = ET.SubElement(attr_w, "attribute")
+            ET.SubElement(a, "name").text = "vineyard_id"
             ET.SubElement(a, "mutable").text = "False"
             ET.SubElement(a, "input_type").text = "text"
             ET.SubElement(a, "default_value").text = ""
             ET.SubElement(a, "values").text = ""
-        a = ET.SubElement(attr_r, "attribute")
-        ET.SubElement(a, "name").text = "row_structure"
-        ET.SubElement(a, "mutable").text = "False"
-        ET.SubElement(a, "input_type").text = "select"
-        ET.SubElement(a, "default_value").text = "regular"
-        ET.SubElement(a, "values").text = "regular\ndisrupted\nunassessable"
 
-        # 4. interrow_area label
-        lbl_i = ET.SubElement(labels, "label")
-        ET.SubElement(lbl_i, "name").text = "interrow_area"
-        ET.SubElement(lbl_i, "type").text = "polygon"
-        attr_i = ET.SubElement(lbl_i, "attributes")
-        a = ET.SubElement(attr_i, "attribute")
-        ET.SubElement(a, "name").text = "vineyard_id"
-        ET.SubElement(a, "mutable").text = "False"
-        ET.SubElement(a, "input_type").text = "text"
-        ET.SubElement(a, "default_value").text = ""
-        ET.SubElement(a, "values").text = ""
-        a = ET.SubElement(attr_i, "attribute")
-        ET.SubElement(a, "name").text = "interrow_cover"
-        ET.SubElement(a, "mutable").text = "False"
-        ET.SubElement(a, "input_type").text = "select"
-        ET.SubElement(a, "default_value").text = "bare_soil"
-        ET.SubElement(a, "values").text = "bare_soil\nvegetation\nmixed\nunassessable"
+            # 3. row label
+            lbl_r = ET.SubElement(labels, "label")
+            ET.SubElement(lbl_r, "name").text = "row"
+            ET.SubElement(lbl_r, "type").text = "polyline"
+            attr_r = ET.SubElement(lbl_r, "attributes")
+            for attr_name in ["vineyard_id", "row_id"]:
+                a = ET.SubElement(attr_r, "attribute")
+                ET.SubElement(a, "name").text = attr_name
+                ET.SubElement(a, "mutable").text = "False"
+                ET.SubElement(a, "input_type").text = "text"
+                ET.SubElement(a, "default_value").text = ""
+                ET.SubElement(a, "values").text = ""
+            a = ET.SubElement(attr_r, "attribute")
+            ET.SubElement(a, "name").text = "row_structure"
+            ET.SubElement(a, "mutable").text = "False"
+            ET.SubElement(a, "input_type").text = "select"
+            ET.SubElement(a, "default_value").text = "regular"
+            ET.SubElement(a, "values").text = "regular\ndisrupted\nunassessable"
+
+            # 4. interrow_area label
+            lbl_i = ET.SubElement(labels, "label")
+            ET.SubElement(lbl_i, "name").text = "interrow_area"
+            ET.SubElement(lbl_i, "type").text = "polygon"
+            attr_i = ET.SubElement(lbl_i, "attributes")
+            a = ET.SubElement(attr_i, "attribute")
+            ET.SubElement(a, "name").text = "vineyard_id"
+            ET.SubElement(a, "mutable").text = "False"
+            ET.SubElement(a, "input_type").text = "text"
+            ET.SubElement(a, "default_value").text = ""
+            ET.SubElement(a, "values").text = ""
+            a = ET.SubElement(attr_i, "attribute")
+            ET.SubElement(a, "name").text = "interrow_cover"
+            ET.SubElement(a, "mutable").text = "False"
+            ET.SubElement(a, "input_type").text = "select"
+            ET.SubElement(a, "default_value").text = "bare_soil"
+            ET.SubElement(a, "values").text = "bare_soil\nvegetation\nmixed\nunassessable"
 
         # Images & annotations
         for tile in self.tiles:
@@ -162,41 +164,7 @@ class CVATWriter:
                 height=str(tile.height),
             )
 
-            # Rows
-            for row in tile.rows:
-                pl = ET.SubElement(
-                    img_el,
-                    "polyline",
-                    label="row",
-                    source="manual",
-                    occluded="0",
-                    points=format_points(row.points),
-                    z_order="0",
-                )
-                a1 = ET.SubElement(pl, "attribute", name="vineyard_id")
-                a1.text = str(row.vineyard_id)
-                a2 = ET.SubElement(pl, "attribute", name="row_id")
-                a2.text = str(row.row_id)
-                a3 = ET.SubElement(pl, "attribute", name="row_structure")
-                a3.text = str(row.row_structure)
-
-            # Inter-rows
-            for ir in tile.interrows:
-                pg = ET.SubElement(
-                    img_el,
-                    "polygon",
-                    label="interrow_area",
-                    source="manual",
-                    occluded="0",
-                    points=format_points(ir.points),
-                    z_order="0",
-                )
-                a1 = ET.SubElement(pg, "attribute", name="vineyard_id")
-                a1.text = str(ir.vineyard_id)
-                a2 = ET.SubElement(pg, "attribute", name="interrow_cover")
-                a2.text = str(ir.interrow_cover)
-
-            # Canopies
+            # Canopies (always written)
             for c in tile.canopies:
                 pg = ET.SubElement(
                     img_el,
@@ -210,22 +178,57 @@ class CVATWriter:
                 a1 = ET.SubElement(pg, "attribute", name="vineyard_id")
                 a1.text = str(c.vineyard_id)
 
-            # Waste boxes
-            for w in tile.waste_boxes:
-                bx = ET.SubElement(
-                    img_el,
-                    "box",
-                    label="waste",
-                    source="manual",
-                    occluded="0",
-                    xtl=f"{w.xtl:.1f}",
-                    ytl=f"{w.ytl:.1f}",
-                    xbr=f"{w.xbr:.1f}",
-                    ybr=f"{w.ybr:.1f}",
-                    z_order="0",
-                )
-                a1 = ET.SubElement(bx, "attribute", name="vineyard_id")
-                a1.text = str(w.vineyard_id)
+            if not self.canopies_only:
+                # Rows
+                for row in tile.rows:
+                    pl = ET.SubElement(
+                        img_el,
+                        "polyline",
+                        label="row",
+                        source="manual",
+                        occluded="0",
+                        points=format_points(row.points),
+                        z_order="0",
+                    )
+                    a1 = ET.SubElement(pl, "attribute", name="vineyard_id")
+                    a1.text = str(row.vineyard_id)
+                    a2 = ET.SubElement(pl, "attribute", name="row_id")
+                    a2.text = str(row.row_id)
+                    a3 = ET.SubElement(pl, "attribute", name="row_structure")
+                    a3.text = str(row.row_structure)
+
+                # Inter-rows
+                for ir in tile.interrows:
+                    pg = ET.SubElement(
+                        img_el,
+                        "polygon",
+                        label="interrow_area",
+                        source="manual",
+                        occluded="0",
+                        points=format_points(ir.points),
+                        z_order="0",
+                    )
+                    a1 = ET.SubElement(pg, "attribute", name="vineyard_id")
+                    a1.text = str(ir.vineyard_id)
+                    a2 = ET.SubElement(pg, "attribute", name="interrow_cover")
+                    a2.text = str(ir.interrow_cover)
+
+                # Waste boxes
+                for w in tile.waste_boxes:
+                    bx = ET.SubElement(
+                        img_el,
+                        "box",
+                        label="waste",
+                        source="manual",
+                        occluded="0",
+                        xtl=f"{w.xtl:.1f}",
+                        ytl=f"{w.ytl:.1f}",
+                        xbr=f"{w.xbr:.1f}",
+                        ybr=f"{w.ybr:.1f}",
+                        z_order="0",
+                    )
+                    a1 = ET.SubElement(bx, "attribute", name="vineyard_id")
+                    a1.text = str(w.vineyard_id)
 
         xml_bytes = ET.tostring(root, encoding="utf-8")
         return '<?xml version="1.0" encoding="utf-8"?>\n' + xml_bytes.decode("utf-8")
