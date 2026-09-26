@@ -20,14 +20,14 @@ def parse_args():
     parser.add_argument(
         "--weights",
         type=str,
-        default="weights/yolo26n_riseholme_best.pt",
-        help="Base model checkpoint to fine-tune from",
+        default="yolo26n-seg.pt",
+        help="Base model checkpoint to fine-tune from (e.g. yolo26n-seg.pt, yolo26s-seg.pt)",
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=25,
-        help="Number of training epochs (default: 25)",
+        default=30,
+        help="Number of training epochs (default: 30)",
     )
     parser.add_argument(
         "--imgsz",
@@ -88,14 +88,17 @@ def main():
         save=True,
     )
 
-    best_pt = Path(f"runs/segment/{args.name}/weights/best.pt")
+    save_dir = getattr(model.trainer, "save_dir", Path(f"runs/segment/{args.name}"))
+    best_pt = Path(save_dir) / "weights" / "best.pt"
     if best_pt.exists():
         target_pt = Path("weights/best.pt")
         target_pt.parent.mkdir(parents=True, exist_ok=True)
         import shutil
         shutil.copy2(best_pt, target_pt)
+        backup_pt = Path("weights/yolo26_unified_best.pt")
+        shutil.copy2(best_pt, backup_pt)
         print("=" * 60)
-        print(f"Trained model saved to {target_pt.resolve()}")
+        print(f"Trained model saved to {target_pt.resolve()} and {backup_pt.resolve()}")
         print("=" * 60)
 
 
