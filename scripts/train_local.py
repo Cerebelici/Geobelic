@@ -20,14 +20,14 @@ def parse_args():
     parser.add_argument(
         "--weights",
         type=str,
-        default="yolo26n-seg.pt",
-        help="Base model checkpoint to fine-tune from (e.g. yolo26n-seg.pt, yolo26s-seg.pt)",
+        default="yolo26l-seg.pt",
+        help="Base model checkpoint to fine-tune from (e.g. yolo26l-seg.pt, yolo26n-seg.pt)",
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=30,
-        help="Number of training epochs (default: 30)",
+        default=20,
+        help="Number of training epochs (default: 20)",
     )
     parser.add_argument(
         "--imgsz",
@@ -38,13 +38,13 @@ def parse_args():
     parser.add_argument(
         "--batch",
         type=int,
-        default=8,
-        help="Batch size (default: 8)",
+        default=4,
+        help="Batch size (default: 4)",
     )
     parser.add_argument(
         "--name",
         type=str,
-        default="vineyard_yolo26n_unified",
+        default="vineyard_yolo26l_unified",
         help="Run name",
     )
     return parser.parse_args()
@@ -95,8 +95,14 @@ def main():
         target_pt.parent.mkdir(parents=True, exist_ok=True)
         import shutil
         shutil.copy2(best_pt, target_pt)
-        backup_pt = Path("weights/yolo26_unified_best.pt")
+
+        # Also save architecture-specific best checkpoint
+        if "yolo26l" in str(args.weights).lower() or "yolo26l" in str(args.name).lower():
+            backup_pt = Path("weights/yolo26l_unified_best.pt")
+        else:
+            backup_pt = Path(f"weights/{args.name}_best.pt")
         shutil.copy2(best_pt, backup_pt)
+
         print("=" * 60)
         print(f"Trained model saved to {target_pt.resolve()} and {backup_pt.resolve()}")
         print("=" * 60)
