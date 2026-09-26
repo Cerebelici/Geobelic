@@ -133,4 +133,4 @@ GDAL metadata on the source also says `UNITTYPE` = metre on the byte samples. Th
 
 A public OpenAerialMap item URL was **not** found while writing this file. The package says the mosaic is the one published on OpenAerialMap. [S-README]
 
-Related: [Data](data.md) · [Route](route.md) · [Conflicts](conflicts.md) · [Annotation](annotation.md)
+Related: [Data](data.md) · [Route](route.md) · [Conflicts](conflicts.md) · [Annotation](annotation.md) · [Cadastru](cadastru.md)

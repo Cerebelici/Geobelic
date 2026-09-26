@@ -118,4 +118,4 @@ The rules’ own polyline snippet: [S-RULES]
 </polyline>
 ```
 
-Related: [Annotation](annotation.md) · [Conflicts](conflicts.md) · [Spatial](spatial.md) · [Examples](examples.md)
+Related: [Plan](plan.md) · [Annotation](annotation.md) · [Conflicts](conflicts.md) · [Spatial](spatial.md) · [Examples](examples.md)

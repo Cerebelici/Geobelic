@@ -22,4 +22,4 @@ Deeptech GigaHack 2026, 25–27 September 2026, Tekwill, Chișinău. The challen
 
 Tie-break: walking-route score, then canopy segmentation, then jury vote. [S-DESC]
 
-Related: [Submission](submission.md) · [Scoring](scoring.md) · [Marcaj](marcaj.md)
+Related: [Plan](plan.md) · [Submission](submission.md) · [Scoring](scoring.md) · [Marcaj](marcaj.md)

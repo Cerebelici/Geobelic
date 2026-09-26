@@ -15,3 +15,5 @@ Part of the [Sireț3 knowledge base](README.md). Cite [sources](sources.md).
 | Study area | Union of the 311 tiles, 81.527 ha. |
 | Exclusion attribute | The official name for `unassessable`. The object is still drawn and the value is scored. |
 | Sireț3 / Siret3 | The orthomosaic and the tile-name prefix. |
+| Teren | One registered land parcel. A part of a cadastral sector. Identified by the cadastral number. [S-SICBI] |
+| Cadastral number | Unique id of a teren, for example `80371140487`. Not a `vineyard_id`. [S-CAD] |

@@ -18,6 +18,7 @@ Each path is a question to close, not a result. Status starts at `not started`. 
 | R10 | What `measurements.csv` columns does the jury need to see? | Required file, schema unstated. | Challenge description “Counts and measurements”; Slack if a template appears. | not started | |
 | R11 | UOPNOA: useful for block masks, or a distraction because it is not plant-level? | Brief warns it is not canopy ground truth. | UOPNOA licence and label spec. | closed: skip for canopy | CC BY 4.0, 33,699 tiles, 0.25 m/px. Class `VI` is a SIGPAC plot mask. Not plant-level. See findings. |
 | R12 | Source mosaic at 2.40 cm vs tiles at 2.50 cm: train on source crops or on the supplied tiles only? | Domain shift and CRS (4326 vs 32635). | [Spatial](spatial.md). | not started | |
+| R13 | Which `terenuri` intersect the 311-tile footprint, and do their edges match block splits? | Decides whether a cadastral overlay is one cached GeoJSON or noise. | WFS bbox on FNDG `terenuri`, intersect in EPSG:32635. Two Sireț points and the start are already looked up. [Cadastru](cadastru.md). | not started | Start 47.1230335, 28.7073776 has no parcel (sector `8037114`). Nearby hits: `80371130109` (0.70 ha, 5 corners) and `80371140487` (0.37 ha, 33 corners, jagged). |
 
 ## Findings log
 

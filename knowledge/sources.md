@@ -21,6 +21,8 @@ Cite these ids in later notes. If a later Slack pin contradicts a PDF, add a new
 | S-UOP | UOPNOA record and Pedrayes et al., Remote Sensing 2021, 13, 2292 | https://doi.org/10.5281/zenodo.4648002 | Plot masks, 0.25 m/px, CC BY 4.0 |
 | S-BARROS | Barros et al. vineyard orthomosaics | arXiv:2108.01200 and https://github.com/Cybonic/DL_vineyard_segmentation_study | GSD and semantic vine masks |
 | S-ESCA | EscaYard, opened 2026-09-25 | https://doi.org/10.5281/zenodo.10362567 | Trunk points, not canopy polygons |
+| S-CAD | Public cadastral lookup, tested 2026-09-26 | `cadastro/moldova-cadastru-api.md`, `cadastro/md_parcel.py`; FNDG WFS `geodata.gov.md` layer `terenuri`; RBI WMS `map.cadastru.md` layer `cad_terenuri` | Parcel id, rings, admin unit, Sireț samples |
+| S-SICBI | SICBI concept note, AGCC, May 2025 | https://www.gov.md/sites/default/files/media/documents/sedinte-de-guvern/2025-05/NU-76-AGCC-2025.pdf | Teren is part of a cadastral sector; the cadastral number is the unique id |
 
 External names mentioned by the brief and still not fetched: OpenAerialMap, SAM, YOLO. Add a source row when one of them is actually opened.
 
