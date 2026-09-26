@@ -16,7 +16,8 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.pipeline import VineyardPipeline
+from shapely.validation import make_valid
+from src.pipeline import VineyardPipeline, extract_polygons
 
 
 def parse_ground_truth(xml_path: str) -> Dict[str, List[Polygon]]:
@@ -38,8 +39,11 @@ def parse_ground_truth(xml_path: str) -> Dict[str, List[Polygon]]:
                 ]
                 if len(coords) >= 3:
                     poly = Polygon(coords)
-                    if poly.is_valid and not poly.is_empty:
-                        polys.append(poly)
+                    if not poly.is_valid:
+                        poly = make_valid(poly)
+                    for valid_p in extract_polygons(poly):
+                        if not valid_p.is_empty and valid_p.area > 0:
+                            polys.append(valid_p)
         gt_by_image[name] = polys
 
     return gt_by_image
@@ -90,17 +94,11 @@ def compute_object_metrics(
     if not pred_polys:
         return {"precision": 0.0, "recall": 0.0, "f1": 0.0, "tp": 0, "fp": 0, "fn": len(gt_polys)}
 
-    # Greedy bipartite matching
-    matched_gt = set()
-    matched_pred = set()
-
+    # Collect candidate pairs
+    candidate_pairs = []
     for p_idx, p_poly in enumerate(pred_polys):
         p_bounds = p_poly.bounds
-        best_iou = 0.0
-        best_g_idx = -1
         for g_idx, g_poly in enumerate(gt_polys):
-            if g_idx in matched_gt:
-                continue
             g_bounds = g_poly.bounds
             # Quick bounding box overlap check
             if (
@@ -116,15 +114,19 @@ def compute_object_metrics(
                     continue
                 union_area = p_poly.area + g_poly.area - inter_area
                 iou = inter_area / union_area if union_area > 0 else 0.0
-                if iou > best_iou:
-                    best_iou = iou
-                    best_g_idx = g_idx
+                if iou >= iou_thresh:
+                    candidate_pairs.append((iou, p_idx, g_idx))
             except Exception:
                 continue
 
-        if best_iou >= iou_thresh and best_g_idx >= 0:
+    # Sorted greedy bipartite matching (highest IoU first)
+    candidate_pairs.sort(key=lambda x: x[0], reverse=True)
+    matched_pred = set()
+    matched_gt = set()
+    for iou, p_idx, g_idx in candidate_pairs:
+        if p_idx not in matched_pred and g_idx not in matched_gt:
             matched_pred.add(p_idx)
-            matched_gt.add(best_g_idx)
+            matched_gt.add(g_idx)
 
     tp = len(matched_pred)
     fp = len(pred_polys) - tp

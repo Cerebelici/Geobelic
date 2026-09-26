@@ -114,9 +114,21 @@ def test_cvat_writer_serialization():
     print("CVAT XML generation and validation verified successfully for both modes.")
 
 
+import unittest
+
+
+class GridAndCvatTestCase(unittest.TestCase):
+    def test_start_point_grid_mapping(self):
+        test_start_point_grid_mapping()
+
+    def test_tile_ul_coordinates(self):
+        test_tile_ul_coordinates()
+
+    def test_cvat_writer_serialization(self):
+        test_cvat_writer_serialization()
+
+
 if __name__ == "__main__":
-    test_start_point_grid_mapping()
-    test_tile_ul_coordinates()
-    test_cvat_writer_serialization()
-    print("All unit tests passed!")
+    unittest.main()
+
 

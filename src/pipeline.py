@@ -35,19 +35,96 @@ def extract_polygons(geom) -> List[Polygon]:
     return []
 
 
+def sanitize_and_format_polygon(
+    poly: Polygon,
+    min_area_px: float = 300.0,
+    max_area_px: float = 15000.0,
+    simplify_tol: float = 1.0,
+) -> List[List[Tuple[float, float]]]:
+    """
+    Decimate with Douglas-Peucker, round to 1 decimal place, remove duplicate
+    consecutive points, and strictly re-verify that the resulting geometry is:
+    1. A valid simple closed polygon with 0 self-intersections.
+    2. Strictly within [min_area_px, max_area_px] AFTER rounding.
+    """
+    if not poly.is_valid:
+        poly = make_valid(poly)
+
+    valid_coords_list = []
+    for p in extract_polygons(poly):
+        p_simp = p.simplify(simplify_tol, preserve_topology=True)
+        if not p_simp.is_valid:
+            p_simp = make_valid(p_simp)
+
+        for sub_p in extract_polygons(p_simp):
+            if sub_p.is_empty:
+                continue
+            # Extract exterior coordinates (dropping repeated endpoint)
+            raw_coords = list(sub_p.exterior.coords)[:-1]
+            if len(raw_coords) < 3:
+                continue
+
+            # Round coordinates to 1 decimal place as required by CVAT format
+            rounded = [(round(float(x), 1), round(float(y), 1)) for x, y in raw_coords]
+
+            # Eliminate consecutive duplicate vertices produced by rounding
+            deduped = [rounded[0]]
+            for pt in rounded[1:]:
+                if pt != deduped[-1]:
+                    deduped.append(pt)
+            if len(deduped) > 1 and deduped[0] == deduped[-1]:
+                deduped.pop()
+
+            if len(deduped) < 3:
+                continue
+
+            # Re-verify topology and area of the actual rounded coordinates
+            final_poly = Polygon(deduped)
+            if not final_poly.is_valid:
+                final_poly = make_valid(final_poly)
+
+            for cand_poly in extract_polygons(final_poly):
+                if (
+                    cand_poly.is_valid
+                    and not cand_poly.is_empty
+                    and cand_poly.exterior.is_simple
+                    and min_area_px <= cand_poly.area <= max_area_px
+                ):
+                    c_pts = [(round(float(x), 1), round(float(y), 1)) for x, y in cand_poly.exterior.coords[:-1]]
+                    # Final deduplication
+                    clean_c = [c_pts[0]]
+                    for pt in c_pts[1:]:
+                        if pt != clean_c[-1]:
+                            clean_c.append(pt)
+                    if len(clean_c) > 1 and clean_c[0] == clean_c[-1]:
+                        clean_c.pop()
+                    if len(clean_c) >= 3:
+                        poly_eval = Polygon(clean_c)
+                        if (
+                            poly_eval.is_valid
+                            and poly_eval.exterior.is_simple
+                            and min_area_px <= poly_eval.area <= max_area_px
+                        ):
+                            valid_coords_list.append(clean_c)
+
+    return valid_coords_list
+
+
 def separate_canopy_polygon(
     pts_np: np.ndarray,
     min_dist_px: float = 40.0,
     min_area_px: float = 300.0,
+    max_area_px: float = 15000.0,
     simplify_tol: float = 1.0,
 ) -> List[List[Tuple[float, float]]]:
     """
     Mentor Concepts Implementation:
     1. Morphological opening (3x3 ellipse) to sever flimsy single-pixel necks.
     2. Euclidean distance transform & marker-controlled watershed for elongated/touching canopies.
-    3. Minimum area filtering (>= 300 px² / ~0.2 m²) to discard weed speckles.
+    3. Minimum area filtering (>= 300 px² / ~0.2 m²) and maximum area threshold (<= 15,000 px² / avoiding whole-row mergers).
     4. Topological sanitization (make_valid + GeometryCollection extraction) and
        Douglas-Peucker simplification (tol=1.0 px -> median 14 vertices matching GT).
+    5. Post-rounding geometric re-validation ensuring 100% valid simple closed polygons.
     """
     if len(pts_np) < 3:
         return []
@@ -62,16 +139,9 @@ def separate_canopy_polygon(
     # If small or compact, sanitize directly without watershed
     if diag < 75 and aspect_ratio < 1.8:
         poly = Polygon(pts_np)
-        if not poly.is_valid:
-            poly = make_valid(poly)
-        valid_polys = []
-        for p in extract_polygons(poly):
-            p_simp = p.simplify(simplify_tol, preserve_topology=True)
-            if p_simp.is_valid and not p_simp.is_empty and min_area_px <= p_simp.area <= 5000.0:
-                coords = [(round(float(x), 1), round(float(y), 1)) for x, y in p_simp.exterior.coords[:-1]]
-                if len(coords) >= 3:
-                    valid_polys.append(coords)
-        return valid_polys
+        return sanitize_and_format_polygon(
+            poly, min_area_px=min_area_px, max_area_px=max_area_px, simplify_tol=simplify_tol
+        )
 
     # Elongated / compound canopies: Morphological Opening & Distance-Transform Watershed
     pad = 4
@@ -101,15 +171,14 @@ def separate_canopy_polygon(
         for cnt in contours:
             if len(cnt) >= 3:
                 cnt_pts = cnt.reshape(-1, 2) + [min_x - pad, min_y - pad]
-                poly = Polygon(cnt_pts)
-                if not poly.is_valid:
-                    poly = make_valid(poly)
-                for p in extract_polygons(poly):
-                    p_simp = p.simplify(simplify_tol, preserve_topology=True)
-                    if p_simp.is_valid and not p_simp.is_empty and min_area_px <= p_simp.area <= 5000.0:
-                        coords = [(round(float(x), 1), round(float(y), 1)) for x, y in p_simp.exterior.coords[:-1]]
-                        if len(coords) >= 3:
-                            valid_polys.append(coords)
+                valid_polys.extend(
+                    sanitize_and_format_polygon(
+                        Polygon(cnt_pts),
+                        min_area_px=min_area_px,
+                        max_area_px=max_area_px,
+                        simplify_tol=simplify_tol,
+                    )
+                )
         return valid_polys
 
     # Multiple peaks: Marker-controlled watershed
@@ -121,7 +190,6 @@ def separate_canopy_polygon(
     cv2.watershed(color_patch, markers)
 
     valid_polys = []
-    max_canopy_area_px = 5000.0  # Challenge plant canopy is ~0.5m^2 (800 px^2), max ~3.0m^2
     for m_id in range(1, len(peak_x) + 1):
         sub_mask = ((markers == m_id) & (opened > 0)).astype(np.uint8) * 255
         if sub_mask.sum() == 0:
@@ -130,15 +198,14 @@ def separate_canopy_polygon(
         for cnt in contours:
             if len(cnt) >= 3:
                 cnt_pts = cnt.reshape(-1, 2) + [min_x - pad, min_y - pad]
-                poly = Polygon(cnt_pts)
-                if not poly.is_valid:
-                    poly = make_valid(poly)
-                for p in extract_polygons(poly):
-                    p_simp = p.simplify(simplify_tol, preserve_topology=True)
-                    if p_simp.is_valid and not p_simp.is_empty and min_area_px <= p_simp.area <= max_canopy_area_px:
-                        coords = [(round(float(x), 1), round(float(y), 1)) for x, y in p_simp.exterior.coords[:-1]]
-                        if len(coords) >= 3:
-                            valid_polys.append(coords)
+                valid_polys.extend(
+                    sanitize_and_format_polygon(
+                        Polygon(cnt_pts),
+                        min_area_px=min_area_px,
+                        max_area_px=max_area_px,
+                        simplify_tol=simplify_tol,
+                    )
+                )
     return valid_polys
 
 
@@ -168,9 +235,11 @@ class VineyardPipeline:
         return "cpu"
 
     @staticmethod
-    def sanitize_polygon(raw_points: np.ndarray, min_area_px: float = 300.0) -> List[List[Tuple[float, float]]]:
+    def sanitize_polygon(
+        raw_points: np.ndarray, min_area_px: float = 300.0, max_area_px: float = 15000.0
+    ) -> List[List[Tuple[float, float]]]:
         """Wrapper around separate_canopy_polygon for backward compatibility."""
-        return separate_canopy_polygon(raw_points, min_area_px=min_area_px)
+        return separate_canopy_polygon(raw_points, min_area_px=min_area_px, max_area_px=max_area_px)
 
     def process_batch(
         self,
@@ -179,6 +248,7 @@ class VineyardPipeline:
         imgsz: int = 2048,
         min_plant_dist_px: float = 40.0,
         min_area_px: float = 300.0,
+        max_area_px: float = 15000.0,
         passages_geojson: str = "assets/02_route/passages.geojson",
         verbose: bool = True,
     ) -> Tuple[List[TileAnnotations], List[Tuple[float, float]]]:
@@ -222,6 +292,7 @@ class VineyardPipeline:
                                     pts,
                                     min_dist_px=min_plant_dist_px,
                                     min_area_px=min_area_px,
+                                    max_area_px=max_area_px,
                                     simplify_tol=1.0,
                                 )
                                 for poly_coords in cleaned_polys:
@@ -244,6 +315,7 @@ class VineyardPipeline:
                                 mask,
                                 min_dist_px=min_plant_dist_px,
                                 min_area_px=min_area_px,
+                                max_area_px=max_area_px,
                                 simplify_tol=1.0,
                             )
                             for poly_coords in cleaned_polys:
@@ -301,7 +373,16 @@ class VineyardPipeline:
         vineyard_id: str = "V01",
         confidence: float = 0.28,
         imgsz: int = 2048,
+        min_area_px: float = 300.0,
+        max_area_px: float = 15000.0,
     ) -> Tuple[TileAnnotations, List[Tuple[float, float]]]:
         """Process a single tile via the batch pipeline for consistent IDs."""
-        anns, targets = self.process_batch([tile_path], confidence=confidence, imgsz=imgsz, verbose=False)
+        anns, targets = self.process_batch(
+            [tile_path],
+            confidence=confidence,
+            imgsz=imgsz,
+            min_area_px=min_area_px,
+            max_area_px=max_area_px,
+            verbose=False,
+        )
         return anns[0], targets
