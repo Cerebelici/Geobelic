@@ -44,9 +44,10 @@ weights/
 
 # Local temporary dumps
 output/
-exports/
 annotations*.xml
 coordinates*.json
+exports/_previous_1016/
+exports/cache/
 
 yolo26l-seg.pt
 yolo26n-seg.pt
