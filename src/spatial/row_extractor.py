@@ -240,3 +240,4 @@ def extract_rows_from_canopies(
     }
 
     return vine_rows, inspection_targets, meta
+
