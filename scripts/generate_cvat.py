@@ -60,6 +60,18 @@ def parse_args():
         help="Block ID prefix (default: V01)",
     )
     parser.add_argument(
+        "--canopies-only",
+        action="store_true",
+        default=False,
+        help="Only export canopies (exclude rows and interrows)",
+    )
+    parser.add_argument(
+        "--margin-px",
+        type=float,
+        default=12.0,
+        help="Row canopy margin in pixels (default: 12.0 px = 0.30 m)",
+    )
+    parser.add_argument(
         "--save-json",
         type=str,
         default="",
@@ -96,12 +108,13 @@ def main():
     print(f"Architecture:  {'RF-DETR-Seg' if is_rfdetr else 'YOLO-Seg'}")
     print(f"Source:        {args.source} ({len(tile_files)} tiles)")
     print(f"Confidence:    {conf} | ImgSz: {args.imgsz}")
+    print(f"Canopies Only: {args.canopies_only} | Margin: {args.margin_px} px")
     print(f"Output XML:    {args.output}")
     print("=" * 60)
 
     # Initialize pipeline
     pipeline = VineyardPipeline(model_weights_path=args.weights)
-    writer = CVATWriter(task_name="Vineyard AI Field Challenge")
+    writer = CVATWriter(task_name="Vineyard AI Field Challenge", canopies_only=args.canopies_only)
 
     raw_coordinates_dump = {}
 
@@ -110,6 +123,9 @@ def main():
         tile_paths=tile_paths,
         confidence=conf,
         imgsz=args.imgsz,
+        extract_rows=not args.canopies_only,
+        extract_interrows=not args.canopies_only,
+        margin_px=args.margin_px,
         verbose=True,
     )
 

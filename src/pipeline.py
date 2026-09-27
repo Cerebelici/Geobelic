@@ -1,4 +1,5 @@
 import torch
+from collections import defaultdict
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import cv2
@@ -18,7 +19,7 @@ from src.export.cvat_writer import (
 )
 from src.spatial.grid import parse_tile_indices, pixel_to_map, START_POINT
 from src.spatial.row_extractor import extract_rows_from_canopies
-from src.spatial.interrow import derive_interrows
+from src.spatial.interrow import derive_interrows, derive_interrow_quadrilaterals
 from src.spatial.block_cluster import GlobalBlockClusterer
 from src.spatial.row_stitcher import GlobalRowStitcher, LocalRowSegment
 
@@ -249,16 +250,20 @@ class VineyardPipeline:
         min_plant_dist_px: float = 40.0,
         min_area_px: float = 300.0,
         max_area_px: float = 15000.0,
+        extract_rows: bool = True,
+        extract_interrows: bool = True,
+        margin_px: float = 12.0,
         passages_geojson: str = "assets/02_route/passages.geojson",
         verbose: bool = True,
     ) -> Tuple[List[TileAnnotations], List[Tuple[float, float]]]:
         """
-        Canopy-Focused Processing Pipeline:
+        Complete Vineyard Pipeline:
         1. High-resolution AI inference per tile (YOLO26-Seg native 2048x2048)
         2. Morphological opening & distance-transform watershed separation
-        3. Clean polygon sanitization & Douglas-Peucker decimation (median 14 vertices)
+        3. Clean polygon sanitization & Douglas-Peucker decimation (median 12-14 vertices)
         4. Global block clustering (EPSG:32635) via 2.5m buffer & passage cuts
-        5. Outputs TileAnnotations containing strictly clean canopies with persistent vineyard_id
+        5. Straight-line row extraction & gap disruption assessment (regular/disrupted)
+        6. Clean quadrilateral inter-row area derivation bounded by row margins
         """
         tile_results = []
         tile_canopy_centroids: Dict[str, List[Tuple[float, float]]] = {}
@@ -344,16 +349,22 @@ class VineyardPipeline:
             clusterer.cluster_blocks(tile_canopy_centroids, buffer_distance_m=2.5)
 
         # -------------------------------------------------------------
-        # Phase 3: Assembly of Final TileAnnotations (Strictly Canopies)
+        # Phase 3: Assembly of TileAnnotations (Canopies, Rows, Interrows)
         # -------------------------------------------------------------
         final_annotations: List[TileAnnotations] = []
+        all_targets: List[Tuple[float, float]] = []
+
+        # Intermediate row storage: tile_name -> block_id -> (v_rows, meta)
+        tile_block_rows: Dict[str, Dict[str, Tuple[List[VineRow], Dict[str, Any]]]] = defaultdict(dict)
+        block_row_segments: Dict[str, List[LocalRowSegment]] = defaultdict(list)
 
         for t_data in tile_results:
             tile_name = t_data["tile_name"]
             coords = tile_parsed_indices.get(tile_name)
             tile_ann = TileAnnotations(image_name=tile_name, width=2048, height=2048)
 
-            # Assign block IDs to sanitized canopies
+            # Assign block IDs to canopies and group centroids per block
+            block_canopy_map: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
             for pts, cent in zip(t_data["canopy_polys"], t_data["canopy_cents"]):
                 if coords is not None:
                     r, c = coords
@@ -362,10 +373,91 @@ class VineyardPipeline:
                 else:
                     v_id = "V01"
                 tile_ann.canopies.append(VineyardCanopy(points=pts, vineyard_id=v_id))
+                block_canopy_map[v_id].append(cent)
+
+            # Extract straight row lines per block
+            if extract_rows:
+                for b_id, b_cents in block_canopy_map.items():
+                    if len(b_cents) >= 2:
+                        v_rows, targets, meta = extract_rows_from_canopies(
+                            canopy_centroids=b_cents,
+                            vineyard_id=b_id,
+                            tile_width=2048,
+                            tile_height=2048,
+                            min_vines_per_row=2,
+                            return_metadata=True,
+                        )
+                        tile_block_rows[tile_name][b_id] = (v_rows, meta)
+                        all_targets.extend(targets)
+
+                        if coords is not None:
+                            r, c = coords
+                            for vr in v_rows:
+                                g_pts = [pixel_to_map(r, c, px, py) for px, py in vr.points]
+                                block_row_segments[b_id].append(
+                                    LocalRowSegment(
+                                        tile_name=tile_name,
+                                        local_points=vr.points,
+                                        global_points=g_pts,
+                                        block_id=b_id,
+                                        row_structure=vr.row_structure,
+                                    )
+                                )
 
             final_annotations.append(tile_ann)
 
-        return final_annotations, []
+        # Cross-tile row stitching if georeferenced and multiple tiles
+        if has_georef and len(tile_paths) > 1 and extract_rows:
+            stitcher = GlobalRowStitcher()
+            stitched_ids_map = {}
+            for b_id, segs in block_row_segments.items():
+                if segs:
+                    updated_segs = stitcher.stitch_block_rows(b_id, segs)
+                    for s in updated_segs:
+                        if s.assigned_row_id and s.local_points:
+                            key = (s.tile_name, b_id, s.local_points[0])
+                            stitched_ids_map[key] = s.assigned_row_id
+
+            # Apply stitched IDs
+            for tile_ann in final_annotations:
+                t_name = tile_ann.image_name
+                for b_id, (v_rows, meta) in tile_block_rows.get(t_name, {}).items():
+                    for vr in v_rows:
+                        if vr.points:
+                            key = (t_name, b_id, vr.points[0])
+                            if key in stitched_ids_map:
+                                vr.row_id = stitched_ids_map[key]
+
+        # Add rows and derive quadrilateral inter-row areas
+        for idx, tile_ann in enumerate(final_annotations):
+            t_name = tile_ann.image_name
+            t_path = tile_results[idx]["tile_path"]
+
+            # Load image for ground cover classification if needed
+            im_rgb = None
+            if extract_interrows and Path(t_path).exists():
+                try:
+                    im_rgb = np.array(Image.open(t_path).convert("RGB"))
+                except Exception:
+                    im_rgb = None
+
+            for b_id, (v_rows, meta) in tile_block_rows.get(t_name, {}).items():
+                tile_ann.rows.extend(v_rows)
+
+                if extract_interrows and meta and len(meta.get("rows_data", [])) >= 2:
+                    ir_quads = derive_interrow_quadrilaterals(
+                        rows_metadata=meta["rows_data"],
+                        normal_dir=meta["normal_dir"],
+                        primary_dir=meta["primary_dir"],
+                        vineyard_id=b_id,
+                        image_rgb=im_rgb,
+                        margin_px=margin_px,
+                        tile_width=2048.0,
+                        tile_height=2048.0,
+                    )
+                    tile_ann.interrows.extend(ir_quads)
+
+        return final_annotations, all_targets
 
     def process_tile(
         self,
@@ -375,6 +467,9 @@ class VineyardPipeline:
         imgsz: int = 2048,
         min_area_px: float = 300.0,
         max_area_px: float = 15000.0,
+        extract_rows: bool = True,
+        extract_interrows: bool = True,
+        margin_px: float = 12.0,
     ) -> Tuple[TileAnnotations, List[Tuple[float, float]]]:
         """Process a single tile via the batch pipeline for consistent IDs."""
         anns, targets = self.process_batch(
@@ -383,6 +478,10 @@ class VineyardPipeline:
             imgsz=imgsz,
             min_area_px=min_area_px,
             max_area_px=max_area_px,
+            extract_rows=extract_rows,
+            extract_interrows=extract_interrows,
+            margin_px=margin_px,
             verbose=False,
         )
         return anns[0], targets
+

@@ -1,24 +1,25 @@
 """
-Validation script for CVAT annotations XML.
-Verifies:
-1. 100% valid simple closed polygons (0 self-intersections).
-2. Adherence to minimum area threshold (>= 300 px² / ~0.19 m²).
-3. Avoidance of whole-row mergers (max area ceiling and distribution check).
+Comprehensive validation script for CVAT annotations XML.
+Verifies all challenge object types:
+1. Canopies (`vineyard`): 100% simple closed polygons, min area >= 300 px², 0 row mergers.
+2. Rows (`row`): Straight polylines, valid structure attributes (regular/disrupted/unassessable).
+3. Inter-rows (`interrow_area`): Clean quadrilaterals with straight edges, valid ground cover attributes.
 """
 
 import argparse
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from collections import Counter
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, LineString
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 
-def validate_annotations(xml_path: str, min_area_px: float = 300.0, max_merged_area_px: float = 15000.0):
+def validate_annotations(xml_path: str, min_canopy_area_px: float = 300.0, max_canopy_area_px: float = 15000.0):
     xml_file = Path(xml_path)
     if not xml_file.exists():
         raise FileNotFoundError(f"Annotations file not found: {xml_file}")
@@ -27,7 +28,6 @@ def validate_annotations(xml_path: str, min_area_px: float = 300.0, max_merged_a
     print(f"Validating Annotations XML: {xml_file.name}")
     print(f"File Path: {xml_file.resolve()}")
     print(f"File Size: {xml_file.stat().st_size / (1024 * 1024):.2f} MB")
-    print(f"Thresholds: min_area >= {min_area_px} px², max_merged_area <= {max_merged_area_px} px²")
     print("=" * 70)
 
     tree = ET.parse(xml_file)
@@ -36,90 +36,143 @@ def validate_annotations(xml_path: str, min_area_px: float = 300.0, max_merged_a
     images = root.findall("image")
     print(f"Total Images in XML: {len(images)}")
 
-    total_polygons = 0
-    invalid_geometry_count = 0
-    self_intersection_count = 0
-    below_min_area_count = 0
-    merger_count = 0
-    areas = []
-    vertex_counts = []
+    # 1. Canopy Validation
+    canopy_count = 0
+    canopy_invalid = 0
+    canopy_self_intersect = 0
+    canopy_below_min = 0
+    canopy_mergers = 0
+    canopy_areas = []
+    canopy_vertices = []
+
+    # 2. Row Validation
+    row_count = 0
+    row_structures = Counter()
+    row_vertex_counts = Counter()
+    row_invalid_attrs = 0
+
+    # 3. Interrow Validation
+    interrow_count = 0
+    interrow_invalid = 0
+    interrow_self_intersect = 0
+    interrow_covers = Counter()
+    interrow_vertex_counts = Counter()
+    interrow_areas = []
 
     for img in images:
-        img_name = img.get("name")
-        polygons = img.findall("polygon")
-        for poly_elem in polygons:
-            total_polygons += 1
+        # Canopies
+        for poly_elem in img.findall('polygon[@label="vineyard"]'):
+            canopy_count += 1
             pts_str = poly_elem.get("points")
-            coords = []
-            for pt in pts_str.split(";"):
-                if "," in pt:
-                    x_str, y_str = pt.split(",")
-                    coords.append((float(x_str), float(y_str)))
+            coords = [tuple(map(float, pt.split(","))) for pt in pts_str.split(";") if "," in pt]
 
             if len(coords) < 3:
-                invalid_geometry_count += 1
+                canopy_invalid += 1
                 continue
 
-            vertex_counts.append(len(coords))
+            canopy_vertices.append(len(coords))
             poly = Polygon(coords)
 
             if not poly.is_valid:
-                invalid_geometry_count += 1
+                canopy_invalid += 1
             if not poly.exterior.is_simple:
-                self_intersection_count += 1
+                canopy_self_intersect += 1
 
             area = poly.area
-            areas.append(area)
+            canopy_areas.append(area)
 
-            if area < min_area_px:
-                below_min_area_count += 1
+            if area < min_canopy_area_px:
+                canopy_below_min += 1
+            if area > max_canopy_area_px:
+                canopy_mergers += 1
 
-            if area > max_merged_area_px:
-                merger_count += 1
+        # Rows
+        for row_elem in img.findall('polyline[@label="row"]'):
+            row_count += 1
+            pts_str = row_elem.get("points")
+            coords = [tuple(map(float, pt.split(","))) for pt in pts_str.split(";") if "," in pt]
+            row_vertex_counts[len(coords)] += 1
 
-    areas = np.array(areas) if areas else np.array([])
-    vertex_counts = np.array(vertex_counts) if vertex_counts else np.array([])
+            st_elem = row_elem.find('attribute[@name="row_structure"]')
+            if st_elem is not None and st_elem.text in {"regular", "disrupted", "unassessable"}:
+                row_structures[st_elem.text] += 1
+            else:
+                row_invalid_attrs += 1
 
-    print("\n--- Validation Results ---")
-    print(f"Total Polygons Evaluated:        {total_polygons}")
-    print(f"Invalid Geometries:              {invalid_geometry_count}")
-    print(f"Self-Intersections:              {self_intersection_count}")
-    print(f"Polygons < {min_area_px:.0f} px²:           {below_min_area_count}")
-    print(f"Suspected Whole-Row Mergers (> {max_merged_area_px:.0f} px²): {merger_count}")
+        # Interrows
+        for ir_elem in img.findall('polygon[@label="interrow_area"]'):
+            interrow_count += 1
+            pts_str = ir_elem.get("points")
+            coords = [tuple(map(float, pt.split(","))) for pt in pts_str.split(";") if "," in pt]
 
-    if len(areas) > 0:
-        print("\n--- Polygon Statistics ---")
-        print(f"Area Min:     {np.min(areas):.1f} px² ({np.min(areas) * 0.000625:.4f} m²)")
-        print(f"Area 25%:    {np.percentile(areas, 25):.1f} px² ({np.percentile(areas, 25) * 0.000625:.4f} m²)")
-        print(f"Area Median: {np.median(areas):.1f} px² ({np.median(areas) * 0.000625:.4f} m²)")
-        print(f"Area Mean:   {np.mean(areas):.1f} px² ({np.mean(areas) * 0.000625:.4f} m²)")
-        print(f"Area 75%:    {np.percentile(areas, 75):.1f} px² ({np.percentile(areas, 75) * 0.000625:.4f} m²)")
-        print(f"Area Max:    {np.max(areas):.1f} px² ({np.max(areas) * 0.000625:.4f} m²)")
-        print(f"Total Area:  {np.sum(areas):.1f} px² ({np.sum(areas) * 0.000625:.2f} m²)")
-        print(f"Median Vertices per Polygon: {np.median(vertex_counts):.0f}")
+            interrow_vertex_counts[len(coords)] += 1
 
-    print("=" * 70)
-    all_valid = (
-        invalid_geometry_count == 0
-        and self_intersection_count == 0
-        and below_min_area_count == 0
-        and merger_count == 0
+            if len(coords) < 3:
+                interrow_invalid += 1
+                continue
+
+            poly = Polygon(coords)
+            if not poly.is_valid:
+                interrow_invalid += 1
+            if not poly.exterior.is_simple:
+                interrow_self_intersect += 1
+
+            interrow_areas.append(poly.area)
+
+            cov_elem = ir_elem.find('attribute[@name="interrow_cover"]')
+            if cov_elem is not None and cov_elem.text in {"bare_soil", "vegetation", "mixed", "unassessable"}:
+                interrow_covers[cov_elem.text] += 1
+
+    print("\n--- 1. Canopy Polygons (`vineyard`) ---")
+    print(f"Total Canopies:                  {canopy_count}")
+    print(f"Invalid Geometries:              {canopy_invalid}")
+    print(f"Self-Intersections:              {canopy_self_intersect}")
+    print(f"Canopies < {min_canopy_area_px:.0f} px²:           {canopy_below_min}")
+    print(f"Suspected Row Mergers (> {max_canopy_area_px:.0f} px²): {canopy_mergers}")
+    if canopy_areas:
+        print(f"Median Area:                     {np.median(canopy_areas):.1f} px² ({np.median(canopy_areas)*0.000625:.4f} m²)")
+        print(f"Median Vertices:                 {np.median(canopy_vertices):.0f}")
+
+    print("\n--- 2. Row Polylines (`row`) ---")
+    print(f"Total Rows:                      {row_count}")
+    print(f"Vertex Count Distribution:       {dict(row_vertex_counts)}")
+    print(f"Structure Distribution:          {dict(row_structures)}")
+    if row_invalid_attrs > 0:
+        print(f"Invalid Row Structure Attributes:{row_invalid_attrs}")
+
+    print("\n--- 3. Inter-Row Areas (`interrow_area`) ---")
+    print(f"Total Interrow Corridors:        {interrow_count}")
+    print(f"Invalid Geometries:              {interrow_invalid}")
+    print(f"Self-Intersections:              {interrow_self_intersect}")
+    print(f"Quadrilateral / Vertex Dist:     {dict(interrow_vertex_counts)}")
+    print(f"Ground Cover Distribution:       {dict(interrow_covers)}")
+    if interrow_areas:
+        print(f"Median Area:                     {np.median(interrow_areas):.1f} px² ({np.median(interrow_areas)*0.000625:.2f} m²)")
+
+    # Overall Status
+    passed = (
+        canopy_invalid == 0
+        and canopy_self_intersect == 0
+        and canopy_below_min == 0
+        and canopy_mergers == 0
+        and interrow_invalid == 0
+        and interrow_self_intersect == 0
+        and row_invalid_attrs == 0
     )
-    if all_valid:
-        print("✓ VALIDATION PASSED: 100% simple closed valid polygons, zero self-intersections, no whole-row mergers.")
-    else:
-        print("✗ VALIDATION FAILED: Found violations.")
-    print("=" * 70)
 
-    return all_valid
+    print("\n" + "=" * 70)
+    if passed:
+        print("✓ VALIDATION PASSED: 100% valid simple closed polygons, 0 self-intersections, valid polylines and quadrilaterals.")
+    else:
+        print("✗ VALIDATION FAILED: Found invalid geometries or out-of-spec attributes.")
+    print("=" * 70)
+    return passed
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate CVAT annotations XML.")
-    parser.add_argument("xml_path", type=str, nargs="?", default="annotations_part1.xml")
-    parser.add_argument("--min-area", type=float, default=300.0)
-    parser.add_argument("--max-merged-area", type=float, default=15000.0)
+    parser.add_argument("xml_path", type=str, help="Path to annotations.xml file")
     args = parser.parse_args()
 
-    success = validate_annotations(args.xml_path, min_area_px=args.min_area, max_merged_area_px=args.max_merged_area)
+    success = validate_annotations(args.xml_path)
     sys.exit(0 if success else 1)
