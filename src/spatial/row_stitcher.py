@@ -6,6 +6,7 @@ Solves cross-tile physical row continuity by:
 - Ensuring segments of the same physical row across tile boundaries receive identical IDs.
 """
 
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Any, Optional
 import numpy as np
@@ -39,6 +40,7 @@ class GlobalRowStitcher:
         determines the block's row orientation, groups collinear lines,
         assigns persistent sequential row IDs (V01-R01, V01-R02...),
         and returns the updated segments.
+        Ensures at most one polyline per physical row per tile (Rule 3).
         """
         if not segments:
             return []
@@ -137,4 +139,49 @@ class GlobalRowStitcher:
             for seg_idx in cluster:
                 segments[seg_idx].assigned_row_id = row_id
 
-        return segments
+        # 8. Unify segments on the same tile belonging to the same physical row (Rule 3)
+        final_segments: List[LocalRowSegment] = []
+        prim_vec = np.array([-normal_vec[1], normal_vec[0]])
+        for cluster_idx in cluster_order:
+            cluster = physical_rows[cluster_idx]
+            tile_segs: Dict[str, List[LocalRowSegment]] = defaultdict(list)
+            for seg_idx in cluster:
+                s = segments[seg_idx]
+                tile_segs[s.tile_name].append(s)
+
+            for tname, s_list in tile_segs.items():
+                if len(s_list) == 1:
+                    final_segments.append(s_list[0])
+                else:
+                    all_local = []
+                    all_global = []
+                    has_disrupt = any(s.row_structure == "disrupted" for s in s_list)
+                    for s in s_list:
+                        all_local.extend(s.local_points)
+                        all_global.extend(s.global_points)
+
+                    # Project in global UTM coordinates where prim_vec is defined
+                    s_projs = [float(np.dot(np.array(p), prim_vec)) for p in all_global]
+                    min_idx = int(np.argmin(s_projs))
+                    max_idx = int(np.argmax(s_projs))
+
+                    # Check if gap between segments is >= 5.0m in UTM coordinates
+                    sorted_global = [all_global[i] for i in np.argsort(s_projs)]
+                    dists = [
+                        np.linalg.norm(np.array(sorted_global[i + 1]) - np.array(sorted_global[i]))
+                        for i in range(len(sorted_global) - 1)
+                    ]
+                    if any(d >= 5.0 for d in dists):
+                        has_disrupt = True
+
+                    merged_seg = LocalRowSegment(
+                        tile_name=tname,
+                        local_points=[all_local[min_idx], all_local[max_idx]],
+                        global_points=[all_global[min_idx], all_global[max_idx]],
+                        block_id=block_id,
+                        row_structure="disrupted" if has_disrupt else "regular",
+                        assigned_row_id=s_list[0].assigned_row_id,
+                    )
+                    final_segments.append(merged_seg)
+
+        return final_segments

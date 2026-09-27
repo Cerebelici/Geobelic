@@ -1,5 +1,5 @@
 import torch
-from collections import defaultdict
+from collections import defaultdict, Counter
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import cv2
@@ -18,7 +18,7 @@ from src.export.cvat_writer import (
     WasteBox,
 )
 from src.spatial.grid import parse_tile_indices, pixel_to_map, START_POINT
-from src.spatial.row_extractor import extract_rows_from_canopies
+from src.spatial.row_extractor import extract_rows_from_canopies, partition_canopies_by_orientation
 from src.spatial.interrow import derive_interrows, derive_interrow_quadrilaterals
 from src.spatial.block_cluster import GlobalBlockClusterer
 from src.spatial.row_stitcher import GlobalRowStitcher, LocalRowSegment
@@ -499,8 +499,8 @@ class VineyardPipeline:
                 tile_ann.canopies.append(VineyardCanopy(points=pts, vineyard_id=v_id))
                 block_canopy_map[v_id].append(cent)
 
-            # Extract straight row lines per block
-            if extract_rows:
+            # Extract straight row lines per orientation group on the tile
+            if extract_rows and len(t_data["canopy_cents"]) >= 2:
                 im_rgb_tile = None
                 if Path(t_data["tile_path"]).exists():
                     try:
@@ -508,57 +508,82 @@ class VineyardPipeline:
                     except Exception:
                         im_rgb_tile = None
 
-                for b_id, b_cents in block_canopy_map.items():
-                    if len(b_cents) >= 2:
-                        v_rows, targets, meta = extract_rows_from_canopies(
-                            canopy_centroids=b_cents,
-                            vineyard_id=b_id,
-                            tile_width=2048,
-                            tile_height=2048,
-                            min_vines_per_row=2,
-                            return_metadata=True,
-                            image_rgb=im_rgb_tile,
-                        )
-                        tile_block_rows[tile_name][b_id] = (v_rows, meta)
-                        all_targets.extend(targets)
+                orientation_groups = partition_canopies_by_orientation(t_data["canopy_cents"], min_angle_diff=25.0)
 
-                        if coords is not None:
-                            r, c = coords
-                            for vr in v_rows:
-                                g_pts = [pixel_to_map(r, c, px, py) for px, py in vr.points]
-                                block_row_segments[b_id].append(
-                                    LocalRowSegment(
-                                        tile_name=tile_name,
-                                        local_points=vr.points,
-                                        global_points=g_pts,
-                                        block_id=b_id,
-                                        row_structure=vr.row_structure,
+                for sub_cents, sub_indices, _ in orientation_groups:
+                    if len(sub_cents) < 2:
+                        continue
+
+                    sub_v_rows, targets, meta = extract_rows_from_canopies(
+                        canopy_centroids=sub_cents,
+                        vineyard_id="V01",
+                        tile_width=2048,
+                        tile_height=2048,
+                        min_vines_per_row=2,
+                        return_metadata=True,
+                        image_rgb=im_rgb_tile,
+                    )
+                    all_targets.extend(targets)
+
+                    if meta and meta.get("rows_data"):
+                        rows_by_block = defaultdict(list)
+                        for rdata in meta["rows_data"]:
+                            if coords is not None:
+                                r, c = coords
+                                b_votes = [clusterer.get_block_id_for_point(*pixel_to_map(r, c, px, py)) for px, py in rdata["cluster"]]
+                                assigned_b = Counter(b_votes).most_common(1)[0][0] if b_votes else "V01"
+                            else:
+                                assigned_b = "V01"
+                            rdata["vineyard_id"] = assigned_b
+                            vr = rdata["vine_row"]
+                            vr.vineyard_id = assigned_b
+                            rows_by_block[assigned_b].append(rdata)
+
+                        for b_id, rdata_list in rows_by_block.items():
+                            v_rows = [rd["vine_row"] for rd in rdata_list]
+                            for r_idx, (rd, vr) in enumerate(zip(rdata_list, v_rows), start=1):
+                                vr.row_id = f"{b_id}-R{r_idx:02d}"
+                                rd["row_id"] = vr.row_id
+                            tile_block_rows[tile_name][b_id] = (
+                                v_rows,
+                                {
+                                    "rows_data": rdata_list,
+                                    "normal_dir": meta["normal_dir"],
+                                    "primary_dir": meta["primary_dir"],
+                                    "azimuth_deg": meta["azimuth_deg"],
+                                },
+                            )
+                            if coords is not None:
+                                r, c = coords
+                                for vr in v_rows:
+                                    g_pts = [pixel_to_map(r, c, px, py) for px, py in vr.points]
+                                    block_row_segments[b_id].append(
+                                        LocalRowSegment(
+                                            tile_name=tile_name,
+                                            local_points=vr.points,
+                                            global_points=g_pts,
+                                            block_id=b_id,
+                                            row_structure=vr.row_structure,
+                                        )
                                     )
-                                )
 
             final_annotations.append(tile_ann)
 
         # Cross-tile row stitching if georeferenced and multiple tiles
+        tile_stitched_rows: Dict[str, Dict[str, List[VineRow]]] = defaultdict(lambda: defaultdict(list))
         if has_georef and len(tile_paths) > 1 and extract_rows:
             stitcher = GlobalRowStitcher()
-            stitched_ids_map = {}
             for b_id, segs in block_row_segments.items():
                 if segs:
                     updated_segs = stitcher.stitch_block_rows(b_id, segs)
                     for s in updated_segs:
-                        if s.assigned_row_id and s.local_points:
-                            key = (s.tile_name, b_id, s.local_points[0])
-                            stitched_ids_map[key] = s.assigned_row_id
-
-            # Apply stitched IDs
-            for tile_ann in final_annotations:
-                t_name = tile_ann.image_name
-                for b_id, (v_rows, meta) in tile_block_rows.get(t_name, {}).items():
-                    for vr in v_rows:
-                        if vr.points:
-                            key = (t_name, b_id, vr.points[0])
-                            if key in stitched_ids_map:
-                                vr.row_id = stitched_ids_map[key]
+                        vr = VineRow(
+                            points=s.local_points,
+                            vineyard_id=s.block_id,
+                            row_id=s.assigned_row_id,
+                            row_structure=s.row_structure,
+                        )
+                        tile_stitched_rows[s.tile_name][s.block_id].append(vr)
 
         # Add rows and derive quadrilateral inter-row areas
         for idx, tile_ann in enumerate(final_annotations):
@@ -573,21 +598,59 @@ class VineyardPipeline:
                 except Exception:
                     im_rgb = None
 
-            for b_id, (v_rows, meta) in tile_block_rows.get(t_name, {}).items():
-                tile_ann.rows.extend(v_rows)
+            block_rows_source = tile_stitched_rows.get(t_name) if (has_georef and len(tile_paths) > 1 and extract_rows) else None
 
-                if extract_interrows and meta and len(meta.get("rows_data", [])) >= 2:
-                    ir_quads = derive_interrow_quadrilaterals(
-                        rows_metadata=meta["rows_data"],
-                        normal_dir=meta["normal_dir"],
-                        primary_dir=meta["primary_dir"],
-                        vineyard_id=b_id,
-                        image_rgb=im_rgb,
-                        margin_px=margin_px,
-                        tile_width=2048.0,
-                        tile_height=2048.0,
-                    )
-                    tile_ann.interrows.extend(ir_quads)
+            if block_rows_source:
+                for b_id, v_rows in block_rows_source.items():
+                    tile_ann.rows.extend(v_rows)
+
+                    meta = tile_block_rows.get(t_name, {}).get(b_id, ([], None))[1]
+                    if extract_interrows and meta and len(v_rows) >= 2:
+                        normal_dir = meta["normal_dir"]
+                        primary_dir = meta["primary_dir"]
+                        rows_metadata = []
+                        for vr in v_rows:
+                            if len(vr.points) >= 2:
+                                c_val = float(np.mean([np.dot(np.array(pt), normal_dir) for pt in vr.points]))
+                                s_projs = [float(np.dot(np.array(pt), primary_dir)) for pt in vr.points]
+                                rows_metadata.append({
+                                    "c_val": c_val,
+                                    "s_min": min(s_projs),
+                                    "s_max": max(s_projs),
+                                    "points": vr.points,
+                                    "row_id": vr.row_id,
+                                    "row_structure": vr.row_structure,
+                                    "vine_row": vr,
+                                })
+
+                        if len(rows_metadata) >= 2:
+                            ir_quads = derive_interrow_quadrilaterals(
+                                rows_metadata=rows_metadata,
+                                normal_dir=normal_dir,
+                                primary_dir=primary_dir,
+                                vineyard_id=b_id,
+                                image_rgb=im_rgb,
+                                margin_px=margin_px,
+                                tile_width=2048.0,
+                                tile_height=2048.0,
+                            )
+                            tile_ann.interrows.extend(ir_quads)
+            else:
+                for b_id, (v_rows, meta) in tile_block_rows.get(t_name, {}).items():
+                    tile_ann.rows.extend(v_rows)
+
+                    if extract_interrows and meta and len(meta.get("rows_data", [])) >= 2:
+                        ir_quads = derive_interrow_quadrilaterals(
+                            rows_metadata=meta["rows_data"],
+                            normal_dir=meta["normal_dir"],
+                            primary_dir=meta["primary_dir"],
+                            vineyard_id=b_id,
+                            image_rgb=im_rgb,
+                            margin_px=margin_px,
+                            tile_width=2048.0,
+                            tile_height=2048.0,
+                        )
+                        tile_ann.interrows.extend(ir_quads)
 
         return final_annotations, all_targets
 

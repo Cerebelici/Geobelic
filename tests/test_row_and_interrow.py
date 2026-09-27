@@ -16,12 +16,14 @@ from src.spatial.row_extractor import (
     estimate_row_angle,
     clip_line_to_tile,
     extract_rows_from_canopies,
+    partition_canopies_by_orientation,
 )
 from src.spatial.interrow import (
     derive_interrow_quadrilaterals,
     classify_interrow_cover,
 )
 from src.pipeline import nms_canopy_polygons
+from src.spatial.row_stitcher import GlobalRowStitcher, LocalRowSegment
 from src.export.cvat_writer import CVATWriter, TileAnnotations
 
 
@@ -54,6 +56,41 @@ class RowAndInterrowTestCase(unittest.TestCase):
         self.assertIn("regular", structures)
         self.assertIn("disrupted", structures)
         self.assertGreaterEqual(len(targets), 1)
+
+    def test_row_gap_continuity_single_polyline(self):
+        """Test that a large gap (>= 5m / 200px) does not split the row into multiple polylines or row_ids."""
+        # Row with 500px gap (12.5 meters) between y=500 and y=1000
+        row_pts = [(300.0, float(y)) for y in [200, 250, 300, 350, 400, 450, 500, 1000, 1050, 1100, 1150, 1200]]
+        rows, targets, meta = extract_rows_from_canopies(row_pts, min_vines_per_row=2)
+
+        # Must produce exactly ONE single polyline, NOT split into two
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row.row_structure, "disrupted")
+        self.assertEqual(len(row.points), 2)
+
+        # Polyline must span through the gap from first vine to last vine
+        y_pts = [p[1] for p in row.points]
+        self.assertLessEqual(min(y_pts), 200.0)
+        self.assertGreaterEqual(max(y_pts), 1200.0)
+
+        # Inspection target must be recorded inside the gap
+        self.assertGreaterEqual(len(targets), 1)
+        self.assertAlmostEqual(targets[0][0], 300.0, delta=5.0)
+        self.assertAlmostEqual(targets[0][1], 750.0, delta=10.0)
+
+    def test_collinear_cluster_unification(self):
+        """Test that collinear canopy clusters along the same physical row are unified into one row."""
+        # Two clusters separated by 400px gap, with slight normal jitter (dx=10px, well within 35px tolerance)
+        cluster_a = [(500.0, float(y)) for y in [100, 150, 200, 250]]
+        cluster_b = [(510.0, float(y)) for y in [650, 700, 750, 800]]
+
+        rows, targets, meta = extract_rows_from_canopies(cluster_a + cluster_b, min_vines_per_row=2)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].row_structure, "disrupted")
+        y_pts = [p[1] for p in rows[0].points]
+        self.assertLessEqual(min(y_pts), 100.0)
+        self.assertGreaterEqual(max(y_pts), 800.0)
 
     def test_interrow_quadrilaterals(self):
         """Test that interrow areas between adjacent rows form clean straight quadrilaterals."""
@@ -274,6 +311,92 @@ class RowAndInterrowTestCase(unittest.TestCase):
             self.assertLessEqual(pt[1], 2048.0)
         poly = Polygon(ir.points)
         self.assertTrue(poly.is_valid)
+
+    def test_row_stitcher_same_tile_unification(self):
+        """Test that GlobalRowStitcher unifies multiple collinear segments on the same tile into one segment."""
+        stitcher = GlobalRowStitcher(offset_tolerance_m=0.40)
+        # Two segments on the same tile (siret3_r006_c004.tif) that are collinear
+        # Easting/Northing offsets are collinear (< 0.40m)
+        seg1 = LocalRowSegment(
+            tile_name="siret3_r006_c004.tif",
+            local_points=[(100.0, 200.0), (100.0, 600.0)],
+            global_points=[(629100.0, 5220200.0), (629100.0, 5220600.0)],
+            block_id="V01",
+            row_structure="regular",
+        )
+        seg2 = LocalRowSegment(
+            tile_name="siret3_r006_c004.tif",
+            local_points=[(100.0, 900.0), (100.0, 1500.0)],
+            global_points=[(629100.0, 5220900.0), (629100.0, 5221500.0)],
+            block_id="V01",
+            row_structure="regular",
+        )
+
+        unified = stitcher.stitch_block_rows("V01", [seg1, seg2])
+        # Two segments on the same tile must be unified into exactly ONE segment (Rule 3)
+        self.assertEqual(len(unified), 1)
+        self.assertEqual(unified[0].assigned_row_id, "V01-R01")
+        # Gap between y=600 and y=900 is 300px (7.5m >= 5m) -> row_structure must be disrupted
+        self.assertEqual(unified[0].row_structure, "disrupted")
+        # Points must span from min to max
+        y_pts = [p[1] for p in unified[0].local_points]
+        self.assertEqual(min(y_pts), 200.0)
+        self.assertEqual(max(y_pts), 1500.0)
+
+    def test_parallel_rows_not_merged_by_collinear_unification(self):
+        """Test that parallel adjacent rows overlapping along row axis are NOT merged into a single row."""
+        # 3 parallel rows at x=100, x=130, x=160 (30px apart, < 35px threshold, but overlapping in y)
+        pts1 = [(100.0, float(y)) for y in range(100, 600, 50)]
+        pts2 = [(130.0, float(y)) for y in range(100, 600, 50)]
+        pts3 = [(160.0, float(y)) for y in range(100, 600, 50)]
+
+        rows, targets, meta = extract_rows_from_canopies(pts1 + pts2 + pts3, min_vines_per_row=2)
+        # Must retain 3 distinct rows, NOT merge them into 1
+        self.assertEqual(len(rows), 3)
+
+    def test_multiple_gaps_unified_into_single_polyline(self):
+        """Test that a row with multiple large gaps is unified into exactly ONE polyline with single row_id."""
+        # 3 segments along Row 1 with two 300px gaps: y=[100..300], y=[600..800], y=[1100..1300]
+        c1 = [(200.0, float(y)) for y in range(100, 301, 50)]
+        c2 = [(205.0, float(y)) for y in range(600, 801, 50)]
+        c3 = [(202.0, float(y)) for y in range(1100, 1301, 50)]
+
+        rows, targets, meta = extract_rows_from_canopies(c1 + c2 + c3, min_vines_per_row=2)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].row_structure, "disrupted")
+        self.assertEqual(len(rows[0].points), 2)
+        y_pts = [p[1] for p in rows[0].points]
+        self.assertLessEqual(min(y_pts), 100.0)
+        self.assertGreaterEqual(max(y_pts), 1300.0)
+        # Should record at least 2 inspection targets (one for each gap)
+        self.assertGreaterEqual(len(targets), 2)
+
+    def test_partition_canopies_by_orientation(self):
+        """Test partitioning of canopies into distinct orientation groups."""
+        # Group 1: 45 deg orientation
+        rad1 = np.radians(45.0)
+        u1 = np.array([np.cos(rad1), np.sin(rad1)])
+        g1 = []
+        for row_off in [-100, 0, 100]:
+            n1 = np.array([-np.sin(rad1), np.cos(rad1)])
+            for s in range(100, 500, 50):
+                p = 500.0 + s * u1 + row_off * n1
+                g1.append((float(p[0]), float(p[1])))
+
+        # Group 2: 125 deg orientation (diff = 80 deg)
+        rad2 = np.radians(125.0)
+        u2 = np.array([np.cos(rad2), np.sin(rad2)])
+        g2 = []
+        for row_off in [-100, 0, 100]:
+            n2 = np.array([-np.sin(rad2), np.cos(rad2)])
+            for s in range(100, 500, 50):
+                p = 1500.0 + s * u2 + row_off * n2
+                g2.append((float(p[0]), float(p[1])))
+
+        groups = partition_canopies_by_orientation(g1 + g2, min_angle_diff=25.0)
+        self.assertEqual(len(groups), 2)
+        self.assertEqual(len(groups[0][0]), len(g1))
+        self.assertEqual(len(groups[1][0]), len(g2))
 
 
 if __name__ == "__main__":

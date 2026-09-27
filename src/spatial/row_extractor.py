@@ -45,8 +45,9 @@ def estimate_row_angle(points: np.ndarray) -> float:
 
     # 1-degree bin histogram
     hist, bin_edges = np.histogram(angles, bins=180, range=(0, 180))
-    # Smooth with simple moving window
-    smoothed = np.convolve(hist, np.ones(5) / 5.0, mode="same")
+    # Smooth with peaked kernel to avoid flat plateaus on sharp peaks
+    kernel = np.array([1, 2, 4, 2, 1], dtype=float) / 10.0
+    smoothed = np.convolve(hist, kernel, mode="same")
     best_ang = bin_edges[np.argmax(smoothed)]
     return float(best_ang)
 
@@ -130,8 +131,8 @@ def is_nodata_pixel(
     image_rgb: np.ndarray,
     x: float,
     y: float,
-    dark_thresh: int = 25,
-    patch_radius: int = 1,
+    dark_thresh: int = 15,
+    patch_radius: int = 2,
 ) -> bool:
     """
     Check if a coordinate (x, y) falls inside a black nodata border area.
@@ -156,7 +157,7 @@ def is_nodata_pixel(
 
     # In true nodata regions, the vast majority of patch pixels are dark (<= dark_thresh)
     dark_fraction = float(np.mean((patch <= dark_thresh).all(axis=2)))
-    return dark_fraction >= 0.4
+    return dark_fraction >= 0.5
 
 
 def extract_rows_from_canopies(
@@ -166,7 +167,7 @@ def extract_rows_from_canopies(
     tile_width: int = 2048,
     tile_height: int = 2048,
     min_vines_per_row: int = 2,
-    spacing_threshold_px: float = 45.0,
+    spacing_threshold_px: float = 25.0,
     return_metadata: bool = True,
     image_rgb: Optional[np.ndarray] = None,
     headland_margin_px: float = 60.0,
@@ -177,6 +178,8 @@ def extract_rows_from_canopies(
     - Rows terminate at the first and last vine in that tile (+ headland margin ~60px / 1.5m).
     - Rows do not extend across roads, cleared land, or into black/nodata image borders.
     - Collinear row centerlines remain straight, aligned with dominant azimuth.
+    - Canopies belonging to the same physical line across the tile form ONE single polyline,
+      passing continuously through any gaps. Gaps >= 5m mark row_structure='disrupted'.
 
     Returns:
         (rows, inspection_targets, metadata)
@@ -204,8 +207,8 @@ def extract_rows_from_canopies(
     sorted_pts = pts[sort_idx]
     sorted_proj = proj_normal[sort_idx]
 
-    # Cluster into rows using spacing threshold (~45px, rows are ~100-120px apart)
-    row_clusters = []
+    # Cluster into candidate rows using spacing threshold (~45px, rows are ~100-120px apart)
+    candidate_clusters = []
     current_cluster = [sorted_pts[0]]
     last_proj = sorted_proj[0]
 
@@ -213,13 +216,55 @@ def extract_rows_from_canopies(
         if sorted_proj[i] - last_proj < spacing_threshold_px:
             current_cluster.append(sorted_pts[i])
         else:
-            if len(current_cluster) >= min_vines_per_row:
-                row_clusters.append(np.array(current_cluster))
+            candidate_clusters.append(np.array(current_cluster))
             current_cluster = [sorted_pts[i]]
         last_proj = sorted_proj[i]
 
-    if len(current_cluster) >= min_vines_per_row:
-        row_clusters.append(np.array(current_cluster))
+    if current_cluster:
+        candidate_clusters.append(np.array(current_cluster))
+
+    # Collinear cluster unification:
+    # Ensure canopies on the same physical line are grouped together into ONE row across the tile despite gaps.
+    # In vineyards, rows are >= 75px apart (~2.0-2.5m).
+    # Clusters belong to the same physical row if:
+    # 1. Normal offset difference <= 35px (~0.87m)
+    # 2. Spans along primary_dir do NOT substantially overlap (i.e. they are sequential along the line separated by a gap)
+    def should_merge_clusters(c1: np.ndarray, c2: np.ndarray) -> bool:
+        c1_norm = np.dot(c1, normal_dir)
+        c2_norm = np.dot(c2, normal_dir)
+        mean1 = float(np.mean(c1_norm))
+        mean2 = float(np.mean(c2_norm))
+        if abs(mean1 - mean2) > 35.0:
+            return False
+
+        s1 = np.dot(c1, primary_dir)
+        s2 = np.dot(c2, primary_dir)
+        min1, max1 = float(np.min(s1)), float(np.max(s1))
+        min2, max2 = float(np.min(s2)), float(np.max(s2))
+
+        # Check overlap along the row direction
+        overlap = max(0.0, min(max1, max2) - max(min1, min2))
+        if overlap > 40.0:
+            return False
+        return True
+
+    # Iterative pairwise unification across gaps
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(candidate_clusters)):
+            for j in range(i + 1, len(candidate_clusters)):
+                if should_merge_clusters(candidate_clusters[i], candidate_clusters[j]):
+                    candidate_clusters[i] = np.vstack([candidate_clusters[i], candidate_clusters[j]])
+                    candidate_clusters.pop(j)
+                    merged = True
+                    break
+            if merged:
+                break
+
+    row_clusters = [c for c in candidate_clusters if len(c) >= min_vines_per_row]
+    # Sort clusters by normal coordinate so row numbering is monotonic
+    row_clusters.sort(key=lambda c: float(np.mean(np.dot(c, normal_dir))))
 
     # 3. For each cluster, fit polyline, check for gaps >= 5m, and create VineRow
     vine_rows: List[VineRow] = []
@@ -376,4 +421,85 @@ def extract_rows_from_canopies(
     }
 
     return vine_rows, inspection_targets, meta
+
+
+def partition_canopies_by_orientation(
+    centroids: List[Tuple[float, float]],
+    min_angle_diff: float = 25.0,
+) -> List[Tuple[List[Tuple[float, float]], List[int], float]]:
+    """
+    Check if canopies contain multiple distinct planting orientations (e.g. multi-block tiles).
+    Returns list of (sub_centroids, original_indices, dominant_angle).
+    If only one orientation mode is present, returns [(centroids, list(range(len(centroids))), dominant_angle)].
+    """
+    if len(centroids) < 10:
+        ang = estimate_row_angle(np.array(centroids, dtype=np.float32)) if len(centroids) >= 2 else 0.0
+        return [(centroids, list(range(len(centroids))), ang)]
+
+    pts = np.array(centroids, dtype=np.float32)
+    tree_kd = KDTree(pts)
+    dists, indices = tree_kd.query(pts, k=min(6, len(pts)))
+    all_angles = []
+    canopy_angles = []
+    for i in range(len(pts)):
+        local_ang = []
+        for d, j in zip(dists[i][1:], indices[i][1:]):
+            if 25.0 <= d <= 85.0:
+                diff = pts[j] - pts[i]
+                ang = np.degrees(np.arctan2(diff[1], diff[0])) % 180.0
+                local_ang.append(ang)
+                all_angles.append(ang)
+        if local_ang:
+            rad2 = np.radians(2.0 * np.array(local_ang))
+            canopy_angles.append(float((np.degrees(np.arctan2(np.sum(np.sin(rad2)), np.sum(np.cos(rad2)))) / 2.0) % 180.0))
+        else:
+            canopy_angles.append(None)
+
+    if len(all_angles) < 10:
+        ang = estimate_row_angle(pts)
+        return [(centroids, list(range(len(centroids))), ang)]
+
+    # 10-degree histogram to find distinct orientation peaks
+    hist, bin_edges = np.histogram(all_angles, bins=18, range=(0, 180))
+    smoothed = np.convolve(hist, np.ones(3) / 3.0, mode="same")
+    peak_bins = [
+        b for b in range(len(smoothed))
+        if smoothed[b] >= 0.08 * len(all_angles)
+        and (b == 0 or smoothed[b] >= smoothed[b - 1])
+        and (b == len(smoothed) - 1 or smoothed[b] >= smoothed[b + 1])
+    ]
+    peaks = [0.5 * (bin_edges[b] + bin_edges[b + 1]) for b in peak_bins]
+
+    # Check if there are distinct peaks separated by >= min_angle_diff
+    distinct = [peaks[0]] if peaks else [float(bin_edges[np.argmax(smoothed)])]
+    for p in peaks[1:]:
+        diff = min(abs(p - distinct[0]), 180.0 - abs(p - distinct[0]))
+        if diff >= min_angle_diff:
+            distinct.append(p)
+            break
+
+    if len(distinct) < 2:
+        ang = estimate_row_angle(pts)
+        return [(centroids, list(range(len(centroids))), ang)]
+
+    p1, p2 = distinct[0], distinct[1]
+    g1, g2 = [], []
+    idx1, idx2 = [], []
+    for i, c in enumerate(centroids):
+        ang = canopy_angles[i]
+        if ang is not None:
+            d1 = min(abs(ang - p1), 180.0 - abs(ang - p1))
+            d2 = min(abs(ang - p2), 180.0 - abs(ang - p2))
+            if d1 <= d2:
+                g1.append(c)
+                idx1.append(i)
+            else:
+                g2.append(c)
+                idx2.append(i)
+        else:
+            g1.append(c)
+            idx1.append(i)
+
+    return [(g1, idx1, p1), (g2, idx2, p2)]
+
 
