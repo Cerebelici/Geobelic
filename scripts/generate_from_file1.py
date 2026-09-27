@@ -574,7 +574,7 @@ def main():
         for part_name, p_writer in sorted(per_part_writers.items()):
             zip_path = zips_dir / f"{part_name}.zip"
             xml_content = p_writer.to_xml_string()
-            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                 # 1. Add annotations.xml at archive root
                 zf.writestr("annotations.xml", xml_content)
                 # 2. Add image files under images/
