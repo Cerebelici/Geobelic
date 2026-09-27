@@ -38,6 +38,7 @@ pip install -r requirements.txt
 * **Model Architecture:** **YOLO26L-Seg** with native end-to-end `Segment26` prediction head.
 * **Pretrained Base:** Ultralytics YOLO26 Large segmentation weights (`yolo26l-seg.pt`).
 * **Fine-Tuned Checkpoint:** [`weights/best.pt`](weights/best.pt) (60.1 MB, fine-tuned on the unified aerial vineyard dataset and Sireț3 ground truth examples).
+* **Vineyard regions:** [`weights/block_unet.pt`](weights/block_unet.pt), a small UNet that paints plantings on a 0.40 m/px mosaic. Run it with `scripts/group_vineyard_blocks.py --skip-train`. How it is trained is in [`knowledge/blocks.md`](knowledge/blocks.md).
 * **Inference Hardware:** Optimized for Apple Silicon MPS (`mps`), NVIDIA CUDA (`cuda`), or multi-core CPU.
 
 ---

@@ -12,6 +12,7 @@ The waste detector is chosen. No route solver or web stack is chosen. The weeken
 
 | Piece | Choice | Why | Status |
 |---|---|---|---|
+| Vineyard regions | `BlockUNet`, weights `weights/block_unet.pt`. Vine pixels on a 0.40 m/px mosaic, then 5 m gaps and passages. | Groups tiles into plantings before canopy inference. Not a scored canopy. See [Blocks](blocks.md). | chosen |
 | Canopy instances | | | open |
 | Waste boxes | YOLO26n detection. Weights `waste/best.pt`, trained on UAVVaste, one class `waste`. A box is kept only when confidence is at least **0.90**. | Below that, the model boxes vines, leaves, and bare soil. A false box costs the same as a miss. | chosen |
 | Row axes | | | open |
@@ -61,5 +62,6 @@ The retired root summary named YOLOv8-seg, SAM, classical vision, RT-DETR, DBSCA
 | 2026-09-27 | Blocks come from connected rows plus passages, not only `file1.txt`. 54 blocks. | The rules say a road always separates blocks (V08 north and south of its track, V02 either side of its road). | `file1.txt` as the block list |
 | 2026-09-27 | Route hop limit 3.5 m (1.72% off-network, 38% of gap targets). | More than 2% off passages and inter-rows scores 0 for the route; 12 m reached 74% but was 5.4% off. | — |
 | 2026-09-26 | Waste detector is YOLO26n at `waste/best.pt`. Export a box only if confidence ≥ 0.90. | Trained on UAVVaste. On Sireț3 tiles it marks vines, leaves, and bare soil. Precision matters more than recall because a false box costs the same as a miss. | — |
+| 2026-09-27 | Vineyard regions use `weights/block_unet.pt`. | A planting is found from 2.7 m row spacing, then split on passages and on gaps of 5 m. The weight is the teacher-fit checkpoint, not a canopy model. | — |
 
 Related: [Plan](plan.md) · [Research](research.md) · [Scoring](scoring.md) · [Cadastru](cadastru.md)
