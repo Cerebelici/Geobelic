@@ -44,6 +44,7 @@ weights/
 
 # Local temporary dumps
 output/
+exports/
 annotations*.xml
 coordinates*.json
 
