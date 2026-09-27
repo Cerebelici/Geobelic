@@ -13,6 +13,7 @@ env/
 venv/
 .pytest_cache/
 .mypy_cache/
+.tools/
 
 # Training Dataset & Runs (Large Files - Do NOT commit)
 dataset/
@@ -23,6 +24,8 @@ runs/
 models/
 *.cache
 *.zip
+# Compressed joint canopy set. Each part is a normal zip under GitHub's 100 MB limit.
+!vine_joint_canopy_part*.zip
 
 # Ultralytics downloads and training output.
 waste/data/
