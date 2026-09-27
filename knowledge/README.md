@@ -19,6 +19,7 @@ licence: imagery CC BY 4.0 (3DATA COLLECT / OpenAerialMap) · passages/forbidden
 cadastru: public parcel polygons (FNDG/RBI) · not a scored label · start point has no parcel · see cadastru.md
 status: waste model chosen (YOLO26n, waste/best.pt, confidence ≥ 0.90) · other pieces open · weekend sequence in plan.md · updated 2026-09-26
 local_assets: assets/ in this repo (orthomosaic via Git LFS)
+rows: whole-map unification · per-tile segments linked across tile edges · refit in EPSG:32635 · cut back to tiles · see rows-and-interrows.md
 index: this file routes; facts live in the other files in this folder
 -->
 
@@ -45,6 +46,7 @@ The participant package is in `assets/` at the repository root. The source ortho
 | PDF vs file disagreements, upload-size trap, visual-guide traps | [Conflicts](conflicts.md) |
 | What the organizer slide deck adds, and what to ignore | [Visual guide](visual-guide.md) |
 | Inspection targets and the walking route | [Route](route.md) |
+| How our rows, inter-rows and block ids are built across tiles | [Rows and inter-rows](rows-and-interrows.md) |
 | Cadastral parcel at a point, and how it can sit on the map | [Cadastru](cadastru.md) |
 | Where a number came from | [Sources](sources.md) |
 | What we decided, and what we have not | [Solution](solution.md) |
