@@ -7,7 +7,7 @@
 ## 1. Project Overview
 
 Geobelic transforms the **Sireț3** unannotated UAV RGB orthomosaic (~145 ha in Moldova, 311 GeoTIFF tiles in `EPSG:32635` at 0.025 m/px) into:
-1. **Marcaj Pre-Annotations:** Compliant **CVAT for images 1.1** XML (`annotations.xml`) containing individual vine canopies, physical row axes with continuity classification, and non-overlapping inter-row ground corridors.
+1. **Marcaj Pre-Annotations:** Compliant **CVAT for images 1.1** XML (`annotations.xml`) and upload-ready ZIP packages containing individual vine canopies, physical straight row axes with continuity classification, and non-overlapping quadrilateral inter-row ground corridors.
 2. **Inspection & Cleanup Route:** An obstacle-avoiding walking route (`route.geojson`) starting and finishing at the organizer-supplied origin, strictly walking on permitted passages and inter-row ground.
 3. **Block & Row Metrics:** Detailed geospatial measurements (`measurements.csv`) in horizontal 2D metres ($m$), square metres ($m^2$), and hectares ($ha$).
 
@@ -19,7 +19,7 @@ Ensure you have **Python 3.10+** (Python 3.11–3.14 supported).
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-team/geobelic.git
+git clone https://github.com/Cerebelici/Geobelic.git
 cd geobelic
 
 # 2. Create and activate a virtual environment
@@ -35,113 +35,115 @@ pip install -r requirements.txt
 
 ## 3. Model Weights & Architecture
 
-* **Model:** **YOLO26-Seg** (`yolo26s-seg`) with native end-to-end `Segment26` prediction head.
-* **Pretrained Base:** Ultralytics YOLO26 Small segmentation weights (`yolo26s-seg.pt`).
-* **Fine-Tuned Weights:** Saved at [`weights/best.pt`](weights/best.pt) (23.3 MB, tracked directly in this repository for zero-dependency reproduction).
+* **Model Architecture:** **YOLO26L-Seg** with native end-to-end `Segment26` prediction head.
+* **Pretrained Base:** Ultralytics YOLO26 Large segmentation weights (`yolo26l-seg.pt`).
+* **Fine-Tuned Checkpoint:** [`weights/best.pt`](weights/best.pt) (60.1 MB, fine-tuned on the unified aerial vineyard dataset and Sireț3 ground truth examples).
+* **Inference Hardware:** Optimized for Apple Silicon MPS (`mps`), NVIDIA CUDA (`cuda`), or multi-core CPU.
 
 ---
 
-## 4. Model Training
+## 4. Challenge Generation & Marcaj ZIP Creation
 
-The model is trained on aerial vineyard segmentation datasets augmented with high-resolution $1024 \times 1024$ crops from the official Sireț3 annotated tiles.
+The primary challenge script [`scripts/generate_from_file1.py`](scripts/generate_from_file1.py) reads the vineyard tile mapping from [`file1.txt`](file1.txt), runs high-resolution inference on the 142 vineyard tiles, assigns block IDs (`V01`–`V34`), stitches rows across tile borders, derives quadrilateral interrow corridors, and creates compliant CVAT 1.1 XML and ZIP packages.
 
-### Step 4.1: Prepare Sireț3 Training Crops (Optional / Reproduce)
-Extract $1024 \times 1024$ training chips directly from the official Sireț3 example tiles:
-```bash
-PYTHONPATH=. .venv/bin/python scripts/prepare_siret3_chips.py
-```
-
-### Step 4.2: Train YOLO26 Model
-Run the training script (automatically detects Apple Silicon `mps`, NVIDIA `cuda:0`, or `cpu`):
-```bash
-PYTHONPATH=. .venv/bin/python scripts/train_yolo.py \
-  --model yolo26s-seg.pt \
-  --data dataset/vineyard_data.yaml \
-  --epochs 30 \
-  --imgsz 1024 \
-  --batch 8 \
-  --name yolo26_vineyard_full
-```
-
-#### Training Arguments:
-* `--model`: Base weights (default: `yolo26s-seg.pt`).
-* `--data`: Path to dataset YAML (default: `dataset/vineyard_data.yaml`).
-* `--epochs`: Training epochs (default: `50`, converged at `30`).
-* `--imgsz`: Training resolution (default: `1024`).
-* `--batch`: Batch size (default: `8`).
-* `--device`: Hardware device (`mps` for Apple Silicon GPU, `0` for CUDA, `cpu`).
-
-Best checkpoint is automatically copied to `weights/best.pt`.
-
----
-
-## 5. End-to-End Challenge Execution
-
-Run the complete pipeline from raw GeoTIFF tiles to all required deliverables (`annotations.xml`, `measurements.csv`, and `route.geojson`) in a single command:
+### Command to Generate All XMLs and Upload ZIPs:
 
 ```bash
-PYTHONPATH=. .venv/bin/python scripts/run_challenge.py \
-  --tiles-dir assets/01_tiles/siret3_challenge_tiles_part1of5 \
+.venv/bin/python scripts/generate_from_file1.py \
+  --file1 file1.txt \
   --weights weights/best.pt \
-  --output-xml annotations.xml \
-  --output-csv measurements.csv \
-  --output-route route.geojson \
-  --package-zip
+  --output annotations_challenge.xml \
+  --output-parts-dir exports/parts \
+  --create-zips
 ```
 
-### What the Pipeline Computes:
-1. **Canopy Polygons (`vineyard`):** Detects individual vine canopy boundaries with YOLO26-Seg.
-2. **Global Block Clustering (`vineyard_id`):** Clusters plants within 5m across tiles using a 2.5m buffer and cuts along roads/passages to assign persistent `V01, V02...` IDs.
-3. **Cross-Tile Row Stitching (`row_id`):** Group collinear row polylines across adjacent tile boundaries within 0.40m tolerance, assigning persistent `V01-R01, V01-R02...` IDs.
-4. **Continuity Assessment (`row_structure`):** Measures in-row distances. Rows with gaps $\ge 5\text{ m}$ are classified as `disrupted` (producing inspection targets); otherwise `regular`.
-5. **Inter-Row Corridors (`interrow_area`):** Computes ground polygons between adjacent rows and strictly subtracts canopy polygons to **guarantee 0% overlap**.
-6. **Ground Cover (`interrow_cover`):** Computes Excess Green index ($2G - R - B$) on ground pixels to classify `bare_soil` (<25%), `mixed` (25–75%), or `vegetation` (>75%).
-7. **Agronomic Measurements (`measurements.csv`):** Per-row lengths ($m$), canopy and inter-row areas ($m^2, ha$), counts, and ground cover.
-8. **Walking Route (`route.geojson`):** Delaunay dual graph on `passages.geojson` combined with inter-row corridors, solving TSP with 2-Opt optimization to visit all gaps $\ge 5\text{ m}$ and waste, returning to `(629504.70, 5220250.75)` within 5 m.
+#### What This Command Produces:
+1. **Master CVAT 1.1 XML:** [`annotations_challenge.xml`](annotations_challenge.xml) containing all 311 challenge tiles in alphabetical order (142 parsed tiles with full annotations + 169 non-vineyard tiles as empty `<image>` elements).
+2. **Per-Part CVAT XMLs (`exports/parts/`):**
+   - `annotations_siret3_challenge_tiles_part1of5.xml` (74 tiles)
+   - `annotations_siret3_challenge_tiles_part2of5.xml` (71 tiles)
+   - `annotations_siret3_challenge_tiles_part3of5.xml` (78 tiles)
+   - `annotations_siret3_challenge_tiles_part4of5.xml` (76 tiles)
+   - `annotations_siret3_challenge_tiles_part5of5.xml` (12 tiles)
+3. **Upload ZIP Archives (`exports/zips/`):**
+   Ready to upload directly to Marcaj. Each archive contains `annotations.xml` at the root and image files under `images/`, compressed with Deflate to strictly adhere to Marcaj's **$\le 90\text{ MB}$ limit**:
+   - `siret3_challenge_tiles_part1of5.zip` (89.5 MB)
+   - `siret3_challenge_tiles_part2of5.zip` (89.5 MB)
+   - `siret3_challenge_tiles_part3of5.zip` (88.6 MB)
+   - `siret3_challenge_tiles_part4of5.zip` (89.6 MB)
+   - `siret3_challenge_tiles_part5of5.zip` (9.9 MB)
 
 ---
 
-## 6. Interactive Web Dashboard
+## 5. Pipeline Details & Quality Guarantees
 
-To launch the interactive Leaflet dashboard to inspect blocks, rows, measurements, and the walking route:
+1. **Canopy Polygon Segmentation (`vineyard`):**
+   - Morphological opening ($3 \times 3$ ellipse) severs single-pixel foliage bridges.
+   - Distance-transform watershed splits touching older vines at typical in-row planting distances (1.0–1.5 m).
+   - Douglas-Peucker simplification (tol=1.0 px) decimation produces a median of 12 vertices matching manual annotations.
+   - **IoU Deduplication (NMS):** Spatial grid-indexed suppression eliminates double/triple polygon predictions on the same plant ($\text{IoU} > 0.35$).
+   - Area filtering strictly preserves crowns in $[300, 15000]\text{ px}^2$ ($[0.19, 9.38]\text{ m}^2$).
+2. **Row Polyline Extraction (`row`):**
+   - Fits straight 2-point polylines per physical row.
+   - **Planting-Bounded Limits:** Rows terminate at the actual first and last vine in the row (with an agronomic headland margin $\le 1.5\text{ m}$), preventing polylines from extending across roads, cleared fields, or black nodata boundaries.
+   - **Continuity Assessment (`row_structure`):** Gaps $\ge 5\text{ m}$ ($200\text{ px}$) trigger `disrupted` and generate inspection targets; otherwise `regular`.
+   - **Global Cross-Tile Stitching (`row_id`):** Group collinear segments across adjacent tile boundaries within $0.40\text{ m}$ tolerance, assigning persistent sequential IDs across each block (e.g. `V01-R01`, `V01-R02`...).
+3. **Quadrilateral Inter-Row Corridors (`interrow_area`):**
+   - Formed between adjacent rows, bounded by straight margins ($12.0\text{ px} = 0.30\text{ m}$) from row axes.
+   - Follows rule *"If one row is shorter, end at the shorter one. Short sides stop where the rows end."*
+   - **100% 4-point quadrilaterals** strictly bounded within tile and planting borders.
+   - **Ground Cover (`interrow_cover`):** Excess Green index ($2G - R - B$) classifies ground as `bare_soil` (<25%), `mixed` (25–75%), or `vegetation` (>75%).
+
+---
+
+## 6. Validation & Testing
+
+Run comprehensive validation on any CVAT XML file:
 
 ```bash
-PYTHONPATH=. .venv/bin/python web/serve.py
+# Validate master XML
+.venv/bin/python scripts/validate_annotations.py annotations_challenge.xml
+
+# Validate all per-part XMLs
+for f in exports/parts/*.xml; do
+  .venv/bin/python scripts/validate_annotations.py "$f"
+done
 ```
 
-Then open your browser at **[http://localhost:8080](http://localhost:8080)**.
+Run automated unit test suite:
 
-* **Live Map:** Renders the Sireț3 survey area, route start point, authorized passages, forbidden zones, and the calculated TSP walking route.
-* **KPI Metrics Bar:** Instant display of Block Count, Row Count, Total Row Length ($km$), Canopy Area ($ha$), Inter-row Area ($ha$), and Target Coverage.
-* **Data Explorer Table:** Live search and filter through all physical rows and their agronomic attributes from `measurements.csv`.
-
----
-
-## 7. Hardware Benchmark & Measured Performance
-
-* **Benchmark Hardware:** Apple M5 Pro (16-core GPU, unified memory, Apple Silicon MPS).
-* **Per-Tile Inference Time:** **$5.3\text{ ms}$** per $1024 \times 1024$ tile.
-* **Batch Processing (74 tiles):** **$14.78\text{ seconds}$** total wall-clock time ($0.20\text{ s/tile}$ including full YOLO26 inference, global block clustering, cross-tile row stitching, interrow derivation, CSV metrics calculation, and TSP route solving).
-* **Full Orthomosaic (311 tiles):** **$\approx 60\text{ seconds}$** complete end-to-end execution.
-* **External APIs / LLMs:** **None.** All inference and spatial algorithms run 100% locally and offline.
+```bash
+.venv/bin/python -m unittest discover tests
+```
 
 ---
 
-## 8. Competition Deliverables
+## 7. Measured Performance Benchmark
+
+* **Hardware:** Apple M5 Pro (18-core, unified memory, Apple Silicon MPS).
+* **Per-Tile Inference & Post-processing:** $\approx 0.73\text{ seconds}$ per $2048 \times 2048$ tile.
+* **Full Challenge Execution (142 vineyard tiles):** **$103.8\text{ seconds}$** total wall-clock time.
+* **XML Validation Status:** **100% PASS** (0 invalid geometries, 0 self-intersections, 0 duplicate canopies, 100% 2-pt rows, 100% 4-pt quadrilaterals).
+* **Offline Execution:** 100% local processing; zero external API or cloud dependencies.
+
+---
+
+## 8. Competition Deliverables Summary
 
 | Deliverable | Location | Description |
 | :--- | :--- | :--- |
-| **Route** | `route.geojson` | Valid LineString in `EPSG:32635` with `length_m`. Returns to `(629504.70, 5220250.75)` within 5 m (exact distance: 0.0 m). |
-| **Measurements** | `measurements.csv` | Lengths ($m$) and areas ($m^2, ha$) by `vineyard_id` / `row_id`. |
-| **Marcaj Import** | `annotations.xml` / `upload_submission.zip` | Exact Marcaj CVAT for images 1.1 XML format + images. |
-| **Trained Weights** | [`weights/best.pt`](weights/best.pt) | Fine-tuned YOLO26-Seg model weights (23.3 MB). |
-| **Web Dashboard** | [`web/`](web/) | Interactive Leaflet dashboard at `http://localhost:8080`. |
+| **Upload ZIP Archives** | `exports/zips/*.zip` | 5 ready-to-upload ZIPs ($\le 90\text{ MB}$ each) for Marcaj |
+| **CVAT XML Master** | `annotations_challenge.xml` | Complete CVAT 1.1 annotations XML for all 311 tiles |
+| **Per-Part CVAT XMLs** | `exports/parts/*.xml` | Chunked CVAT 1.1 XMLs per challenge part folder |
+| **Trained Weights** | [`weights/best.pt`](weights/best.pt) | Fine-tuned YOLO26L-Seg model checkpoint (60.1 MB) |
+| **Tile Mapping** | [`file1.txt`](file1.txt) | Ground-truth vineyard block to tile pairings (33 blocks) |
+| **Walking Route** | `route.geojson` | Valid LineString in `EPSG:32635` visiting all gaps & waste |
+| **Measurements** | `measurements.csv` | Agronomic lengths and areas by `vineyard_id` / `row_id` |
 
 ---
 
-## 9. Licences & Attribution
+## 9. Licenses & Attribution
 
 * **Sireț3 UAV Imagery:** **CC BY 4.0** — Credit: *3DATA COLLECT / OpenAerialMap*, contributors to the Open Imagery Network.
 * **Passages & Restrictions Vector Data:** Contains OpenStreetMap data, © OpenStreetMap contributors, **ODbL**.
 * **Code:** MIT License.
-
