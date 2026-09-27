@@ -24,7 +24,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.pipeline import VineyardPipeline, separate_canopy_polygon
+from src.pipeline import VineyardPipeline, separate_canopy_polygon, nms_canopy_polygons
 from src.export.cvat_writer import (
     CVATWriter,
     TileAnnotations,
@@ -352,11 +352,20 @@ def main():
             verbose=False,
         )[0]
 
-        canopy_polys: List[List[Tuple[float, float]]] = []
-        canopy_cents: List[Tuple[float, float]] = []
+        im_rgb = None
+        try:
+            im_rgb = np.array(Image.open(t_path).convert("RGB"))
+        except Exception:
+            im_rgb = None
 
+        raw_candidates: List[Tuple[float, List[Tuple[float, float]]]] = []
         if results.masks is not None:
-            for mask in results.masks.xy:
+            confs = (
+                results.boxes.conf.cpu().numpy()
+                if results.boxes is not None and results.boxes.conf is not None
+                else [1.0] * len(results.masks.xy)
+            )
+            for mask, conf in zip(results.masks.xy, confs):
                 cleaned_polys = separate_canopy_polygon(
                     mask,
                     min_dist_px=40.0,
@@ -365,9 +374,23 @@ def main():
                     simplify_tol=1.0,
                 )
                 for poly_coords in cleaned_polys:
-                    canopy_polys.append(poly_coords)
-                    c_poly = Polygon(poly_coords)
-                    canopy_cents.append((float(c_poly.centroid.x), float(c_poly.centroid.y)))
+                    raw_candidates.append((float(conf), poly_coords))
+
+        canopy_polys: List[List[Tuple[float, float]]] = []
+        canopy_cents: List[Tuple[float, float]] = []
+
+        deduped_polys = nms_canopy_polygons(
+            raw_candidates,
+            iou_thresh=0.25,
+            iomin_thresh=0.35,
+            min_dist_px=25.0,
+            min_area_px=args.min_area_px,
+            max_area_px=args.max_area_px,
+        )
+        for poly_coords in deduped_polys:
+            canopy_polys.append(poly_coords)
+            c_poly = Polygon(poly_coords)
+            canopy_cents.append((float(c_poly.centroid.x), float(c_poly.centroid.y)))
 
         # Assign candidate block to each canopy
         block_canopy_cents: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
@@ -398,6 +421,8 @@ def main():
                     tile_height=2048,
                     min_vines_per_row=2,
                     return_metadata=True,
+                    image_rgb=im_rgb,
+                    headland_margin_px=60.0,
                 )
                 tile_block_row_data[tname][vid] = {
                     "v_rows": v_rows,

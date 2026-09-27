@@ -42,6 +42,7 @@ def validate_annotations(xml_path: str, min_canopy_area_px: float = 300.0, max_c
     canopy_self_intersect = 0
     canopy_below_min = 0
     canopy_mergers = 0
+    canopy_duplicates = 0
     canopy_areas = []
     canopy_vertices = []
 
@@ -58,6 +59,7 @@ def validate_annotations(xml_path: str, min_canopy_area_px: float = 300.0, max_c
     interrow_covers = Counter()
     interrow_vertex_counts = Counter()
     interrow_areas = []
+    coords_out_of_bounds = 0
 
     for img in images:
         # Canopies
@@ -65,6 +67,9 @@ def validate_annotations(xml_path: str, min_canopy_area_px: float = 300.0, max_c
             canopy_count += 1
             pts_str = poly_elem.get("points")
             coords = [tuple(map(float, pt.split(","))) for pt in pts_str.split(";") if "," in pt]
+
+            if any(x < -0.1 or x > 2048.1 or y < -0.1 or y > 2048.1 for x, y in coords):
+                coords_out_of_bounds += 1
 
             if len(coords) < 3:
                 canopy_invalid += 1
@@ -86,11 +91,37 @@ def validate_annotations(xml_path: str, min_canopy_area_px: float = 300.0, max_c
             if area > max_canopy_area_px:
                 canopy_mergers += 1
 
+        # Check for duplicate overlapping canopies on this image
+        img_canopies = []
+        for poly_elem in img.findall('polygon[@label="vineyard"]'):
+            pts_str = poly_elem.get("points")
+            coords = [tuple(map(float, pt.split(","))) for pt in pts_str.split(";") if "," in pt]
+            if len(coords) >= 3:
+                p = Polygon(coords)
+                if p.is_valid:
+                    img_canopies.append((p, p.bounds, p.area))
+
+        for i in range(len(img_canopies)):
+            p1, b1, a1 = img_canopies[i]
+            for j in range(i + 1, len(img_canopies)):
+                p2, b2, a2 = img_canopies[j]
+                if b1[2] < b2[0] or b2[2] < b1[0] or b1[3] < b2[1] or b2[3] < b1[1]:
+                    continue
+                inter = p1.intersection(p2).area
+                if inter > 0.0:
+                    union = a1 + a2 - inter
+                    iou = inter / union if union > 0.0 else 0.0
+                    iomin = inter / min(a1, a2)
+                    if iou > 0.35 or iomin > 0.45:
+                        canopy_duplicates += 1
+
         # Rows
         for row_elem in img.findall('polyline[@label="row"]'):
             row_count += 1
             pts_str = row_elem.get("points")
             coords = [tuple(map(float, pt.split(","))) for pt in pts_str.split(";") if "," in pt]
+            if any(x < -0.1 or x > 2048.1 or y < -0.1 or y > 2048.1 for x, y in coords):
+                coords_out_of_bounds += 1
             row_vertex_counts[len(coords)] += 1
 
             st_elem = row_elem.find('attribute[@name="row_structure"]')
@@ -104,6 +135,8 @@ def validate_annotations(xml_path: str, min_canopy_area_px: float = 300.0, max_c
             interrow_count += 1
             pts_str = ir_elem.get("points")
             coords = [tuple(map(float, pt.split(","))) for pt in pts_str.split(";") if "," in pt]
+            if any(x < -0.1 or x > 2048.1 or y < -0.1 or y > 2048.1 for x, y in coords):
+                coords_out_of_bounds += 1
 
             interrow_vertex_counts[len(coords)] += 1
 
@@ -123,10 +156,14 @@ def validate_annotations(xml_path: str, min_canopy_area_px: float = 300.0, max_c
             if cov_elem is not None and cov_elem.text in {"bare_soil", "vegetation", "mixed", "unassessable"}:
                 interrow_covers[cov_elem.text] += 1
 
+    interrow_non_quad = sum(cnt for v_cnt, cnt in interrow_vertex_counts.items() if v_cnt != 4)
+    row_non_straight = sum(cnt for v_cnt, cnt in row_vertex_counts.items() if v_cnt != 2)
+
     print("\n--- 1. Canopy Polygons (`vineyard`) ---")
     print(f"Total Canopies:                  {canopy_count}")
     print(f"Invalid Geometries:              {canopy_invalid}")
     print(f"Self-Intersections:              {canopy_self_intersect}")
+    print(f"Duplicated Canopies (IoU > 0.35):{canopy_duplicates}")
     print(f"Canopies < {min_canopy_area_px:.0f} px²:           {canopy_below_min}")
     print(f"Suspected Row Mergers (> {max_canopy_area_px:.0f} px²): {canopy_mergers}")
     if canopy_areas:
@@ -139,32 +176,43 @@ def validate_annotations(xml_path: str, min_canopy_area_px: float = 300.0, max_c
     print(f"Structure Distribution:          {dict(row_structures)}")
     if row_invalid_attrs > 0:
         print(f"Invalid Row Structure Attributes:{row_invalid_attrs}")
+    if row_non_straight > 0:
+        print(f"Non-Straight Rows (!= 2 pts):   {row_non_straight}")
 
     print("\n--- 3. Inter-Row Areas (`interrow_area`) ---")
     print(f"Total Interrow Corridors:        {interrow_count}")
     print(f"Invalid Geometries:              {interrow_invalid}")
     print(f"Self-Intersections:              {interrow_self_intersect}")
     print(f"Quadrilateral / Vertex Dist:     {dict(interrow_vertex_counts)}")
+    if interrow_non_quad > 0:
+        print(f"Non-Quadrilateral Corridors:     {interrow_non_quad}")
     print(f"Ground Cover Distribution:       {dict(interrow_covers)}")
     if interrow_areas:
         print(f"Median Area:                     {np.median(interrow_areas):.1f} px² ({np.median(interrow_areas)*0.000625:.2f} m²)")
+
+    if coords_out_of_bounds > 0:
+        print(f"Coordinates Out of Bounds:      {coords_out_of_bounds}")
 
     # Overall Status
     passed = (
         canopy_invalid == 0
         and canopy_self_intersect == 0
+        and canopy_duplicates == 0
         and canopy_below_min == 0
         and canopy_mergers == 0
         and interrow_invalid == 0
         and interrow_self_intersect == 0
+        and interrow_non_quad == 0
         and row_invalid_attrs == 0
+        and row_non_straight == 0
+        and coords_out_of_bounds == 0
     )
 
     print("\n" + "=" * 70)
     if passed:
-        print("✓ VALIDATION PASSED: 100% valid simple closed polygons, 0 self-intersections, valid polylines and quadrilaterals.")
+        print("✓ VALIDATION PASSED: 100% valid simple closed polygons, 0 duplicates, 0 self-intersections, 100% 2-pt polylines, 100% 4-pt quadrilaterals.")
     else:
-        print("✗ VALIDATION FAILED: Found invalid geometries or out-of-spec attributes.")
+        print("✗ VALIDATION FAILED: Found invalid geometries, duplicates, non-quadrilaterals, or out-of-spec attributes.")
     print("=" * 70)
     return passed
 

@@ -210,6 +210,115 @@ def separate_canopy_polygon(
     return valid_polys
 
 
+def nms_canopy_polygons(
+    candidates: Any,
+    iou_thresh: float = 0.25,
+    iomin_thresh: float = 0.35,
+    min_dist_px: float = 25.0,
+    min_area_px: float = 300.0,
+    max_area_px: float = 15000.0,
+) -> List[List[Tuple[float, float]]]:
+    """
+    Polygon Non-Maximum Suppression (IoU & IoMin deduplication) on extracted canopies.
+    Removes duplicate overlapping canopy polygon predictions on the same vine,
+    ensuring each physical vine has exactly one canopy polygon.
+
+    Parameters:
+        candidates: List of (score, poly_coords) tuples or List of poly_coords
+        iou_thresh: Maximum allowed Intersection-over-Union between distinct plants (default: 0.25)
+        iomin_thresh: Maximum allowed Intersection-over-Min-Area (containment) (default: 0.35)
+        min_dist_px: Centroid distance threshold below which overlapping polygons are deduplicated (default: 25.0 px)
+        min_area_px: Minimum canopy polygon area (default: 300.0 px²)
+        max_area_px: Maximum canopy polygon area (default: 15000.0 px²)
+
+    Returns:
+        Deduplicated list of simple polygon coordinates List[List[Tuple[float, float]]]
+    """
+    if not candidates:
+        return []
+
+    # Standardize input format
+    valid_cands = []
+    for item in candidates:
+        if isinstance(item, tuple) and len(item) == 2:
+            score = float(item[0])
+            coords_raw = item[1]
+        elif isinstance(item, (list, tuple, np.ndarray, Polygon)):
+            score = 1.0
+            coords_raw = item
+        else:
+            continue
+
+        if isinstance(coords_raw, Polygon):
+            coords = list(coords_raw.exterior.coords)[:-1]
+        elif isinstance(coords_raw, (list, tuple, np.ndarray)):
+            coords = [tuple(map(float, pt)) for pt in coords_raw]
+        else:
+            continue
+
+        if len(coords) < 3:
+            continue
+
+        p = Polygon(coords)
+        if not p.is_valid:
+            p = make_valid(p)
+            for sub_p in extract_polygons(p):
+                if sub_p.is_valid and min_area_px <= sub_p.area <= max_area_px:
+                    c = (float(sub_p.centroid.x), float(sub_p.centroid.y))
+                    b = sub_p.bounds
+                    c_pts = [(round(float(x), 1), round(float(y), 1)) for x, y in sub_p.exterior.coords[:-1]]
+                    valid_cands.append((score, c_pts, sub_p, c, b))
+        elif min_area_px <= p.area <= max_area_px:
+            c = (float(p.centroid.x), float(p.centroid.y))
+            b = p.bounds
+            valid_cands.append((score, coords, p, c, b))
+
+    if not valid_cands:
+        return []
+
+    # Sort descending by confidence score (prefer higher score; tie-break with area)
+    valid_cands.sort(key=lambda x: (x[0], x[2].area), reverse=True)
+
+    kept: List[Tuple[float, List[Tuple[float, float]], Polygon, Tuple[float, float], Tuple[float, float, float, float]]] = []
+
+    for score, coords, p, c, b in valid_cands:
+        is_dup = False
+        p_area = p.area
+        for k_score, k_coords, k_p, k_c, k_b in kept:
+            # Fast AABB pre-filter
+            if b[2] < k_b[0] or k_b[2] < b[0] or b[3] < k_b[1] or k_b[3] < b[1]:
+                continue
+
+            dx = c[0] - k_c[0]
+            dy = c[1] - k_c[1]
+            dist = (dx * dx + dy * dy) ** 0.5
+
+            try:
+                inter_geom = p.intersection(k_p)
+                inter_area = float(inter_geom.area)
+            except Exception:
+                inter_area = 0.0
+
+            if inter_area > 0.0:
+                k_area = k_p.area
+                union = p_area + k_area - inter_area
+                iou = inter_area / union if union > 0.0 else 0.0
+                iomin = inter_area / min(p_area, k_area)
+
+                if (
+                    iou >= iou_thresh
+                    or iomin >= iomin_thresh
+                    or (dist < min_dist_px and inter_area > 0.08 * min(p_area, k_area))
+                ):
+                    is_dup = True
+                    break
+
+        if not is_dup:
+            kept.append((score, coords, p, c, b))
+
+    return [k[1] for k in kept]
+
+
 class VineyardPipeline:
     def __init__(self, model_weights_path: Optional[str] = None):
         self.model_weights = model_weights_path
@@ -282,6 +391,7 @@ class VineyardPipeline:
 
             canopy_polys: List[List[Tuple[float, float]]] = []
             canopy_cents: List[Tuple[float, float]] = []
+            raw_candidates: List[Tuple[float, List[Tuple[float, float]]]] = []
 
             if self.model is not None:
                 if self.model_type == "rfdetr":
@@ -301,9 +411,7 @@ class VineyardPipeline:
                                     simplify_tol=1.0,
                                 )
                                 for poly_coords in cleaned_polys:
-                                    canopy_polys.append(poly_coords)
-                                    c_poly = Polygon(poly_coords)
-                                    canopy_cents.append((float(c_poly.centroid.x), float(c_poly.centroid.y)))
+                                    raw_candidates.append((1.0, poly_coords))
                 else:
                     results = self.model.predict(
                         tile_path,
@@ -315,7 +423,12 @@ class VineyardPipeline:
                     )[0]
 
                     if results.masks is not None:
-                        for mask in results.masks.xy:
+                        confs = (
+                            results.boxes.conf.cpu().numpy()
+                            if results.boxes is not None and results.boxes.conf is not None
+                            else [1.0] * len(results.masks.xy)
+                        )
+                        for mask, conf in zip(results.masks.xy, confs):
                             cleaned_polys = separate_canopy_polygon(
                                 mask,
                                 min_dist_px=min_plant_dist_px,
@@ -324,9 +437,20 @@ class VineyardPipeline:
                                 simplify_tol=1.0,
                             )
                             for poly_coords in cleaned_polys:
-                                canopy_polys.append(poly_coords)
-                                c_poly = Polygon(poly_coords)
-                                canopy_cents.append((float(c_poly.centroid.x), float(c_poly.centroid.y)))
+                                raw_candidates.append((float(conf), poly_coords))
+
+                deduped_polys = nms_canopy_polygons(
+                    raw_candidates,
+                    iou_thresh=0.25,
+                    iomin_thresh=0.35,
+                    min_dist_px=25.0,
+                    min_area_px=min_area_px,
+                    max_area_px=max_area_px,
+                )
+                for poly_coords in deduped_polys:
+                    canopy_polys.append(poly_coords)
+                    c_poly = Polygon(poly_coords)
+                    canopy_cents.append((float(c_poly.centroid.x), float(c_poly.centroid.y)))
 
             tile_canopy_centroids[tile_name] = canopy_cents
             tile_results.append({
@@ -377,6 +501,13 @@ class VineyardPipeline:
 
             # Extract straight row lines per block
             if extract_rows:
+                im_rgb_tile = None
+                if Path(t_data["tile_path"]).exists():
+                    try:
+                        im_rgb_tile = np.array(Image.open(t_data["tile_path"]).convert("RGB"))
+                    except Exception:
+                        im_rgb_tile = None
+
                 for b_id, b_cents in block_canopy_map.items():
                     if len(b_cents) >= 2:
                         v_rows, targets, meta = extract_rows_from_canopies(
@@ -386,6 +517,7 @@ class VineyardPipeline:
                             tile_height=2048,
                             min_vines_per_row=2,
                             return_metadata=True,
+                            image_rgb=im_rgb_tile,
                         )
                         tile_block_rows[tile_name][b_id] = (v_rows, meta)
                         all_targets.extend(targets)

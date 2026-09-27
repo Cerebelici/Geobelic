@@ -51,6 +51,43 @@ def estimate_row_angle(points: np.ndarray) -> float:
     return float(best_ang)
 
 
+def get_line_tile_s_bounds(
+    c_val: float,
+    normal_dir: np.ndarray,
+    primary_dir: np.ndarray,
+    tile_width: float = 2048.0,
+    tile_height: float = 2048.0,
+) -> Optional[Tuple[float, float]]:
+    """
+    Compute analytical [s_min, s_max] parameter range along primary_dir
+    where c_val * normal_dir + s * primary_dir lies within [0, tile_width] x [0, tile_height].
+    """
+    nx, ny = float(normal_dir[0]), float(normal_dir[1])
+    px, py = float(primary_dir[0]), float(primary_dir[1])
+    s_min = -1e9
+    s_max = 1e9
+
+    if abs(px) > 1e-7:
+        b1 = (-c_val * nx) / px
+        b2 = (tile_width - c_val * nx) / px
+        s_min = max(s_min, min(b1, b2))
+        s_max = min(s_max, max(b1, b2))
+    elif c_val * nx < 0.0 or c_val * nx > tile_width:
+        return None
+
+    if abs(py) > 1e-7:
+        b1 = (-c_val * ny) / py
+        b2 = (tile_height - c_val * ny) / py
+        s_min = max(s_min, min(b1, b2))
+        s_max = min(s_max, max(b1, b2))
+    elif c_val * ny < 0.0 or c_val * ny > tile_height:
+        return None
+
+    if s_min > s_max:
+        return None
+    return s_min, s_max
+
+
 def clip_line_to_tile(
     c_val: float,
     normal_dir: np.ndarray,
@@ -64,47 +101,62 @@ def clip_line_to_tile(
 
     Returns 2 boundary intersection points [(x1, y1), (x2, y2)] rounded to 1 decimal.
     """
-    nx, ny = float(normal_dir[0]), float(normal_dir[1])
-    pts = []
+    if primary_dir is None:
+        primary_dir = np.array([-normal_dir[1], normal_dir[0]])
 
-    # Intersections with vertical boundaries x = 0 and x = tile_width
-    if abs(ny) > 1e-5:
-        y0 = c_val / ny
-        if 0.0 <= y0 <= tile_height:
-            pts.append((0.0, y0))
-        y1 = (c_val - nx * tile_width) / ny
-        if 0.0 <= y1 <= tile_height:
-            pts.append((tile_width, y1))
+    bounds = get_line_tile_s_bounds(c_val, normal_dir, primary_dir, tile_width, tile_height)
+    if bounds is None:
+        return []
 
-    # Intersections with horizontal boundaries y = 0 and y = tile_height
-    if abs(nx) > 1e-5:
-        x0 = c_val / nx
-        if 0.0 < x0 < tile_width:
-            pts.append((x0, 0.0))
-        x1 = (c_val - ny * tile_height) / nx
-        if 0.0 < x1 < tile_width:
-            pts.append((x1, tile_height))
+    s_min, s_max = bounds
+    p1 = c_val * normal_dir + s_min * primary_dir
+    p2 = c_val * normal_dir + s_max * primary_dir
 
-    # Deduplicate points that are extremely close (< 0.2 px)
-    unique_pts: List[Tuple[float, float]] = []
-    for p in pts:
-        if not any(np.hypot(p[0] - u[0], p[1] - u[1]) < 0.2 for u in unique_pts):
-            unique_pts.append((round(float(p[0]), 1), round(float(p[1]), 1)))
+    p1_clamped = (
+        round(float(np.clip(p1[0], 0.0, tile_width)), 1),
+        round(float(np.clip(p1[1], 0.0, tile_height)), 1),
+    )
+    p2_clamped = (
+        round(float(np.clip(p2[0], 0.0, tile_width)), 1),
+        round(float(np.clip(p2[1], 0.0, tile_height)), 1),
+    )
 
-    if len(unique_pts) == 2:
-        if primary_dir is not None:
-            px, py = float(primary_dir[0]), float(primary_dir[1])
-            unique_pts.sort(key=lambda pt: pt[0] * px + pt[1] * py)
-        return unique_pts
-    elif len(unique_pts) > 2:
-        # If clipped corner produces 3 points, take the two outermost points
-        if primary_dir is not None:
-            px, py = float(primary_dir[0]), float(primary_dir[1])
-            unique_pts.sort(key=lambda pt: pt[0] * px + pt[1] * py)
-            return [unique_pts[0], unique_pts[-1]]
-        return unique_pts[:2]
+    if p1_clamped == p2_clamped:
+        return []
 
-    return []
+    return [p1_clamped, p2_clamped]
+
+def is_nodata_pixel(
+    image_rgb: np.ndarray,
+    x: float,
+    y: float,
+    dark_thresh: int = 25,
+    patch_radius: int = 1,
+) -> bool:
+    """
+    Check if a coordinate (x, y) falls inside a black nodata border area.
+    Distinguishes real nodata borders (contiguous black pixels [0,0,0] from flight boundary)
+    from isolated dark shadows (single-pixel deep shadows under vines or trellis).
+    """
+    h, w = image_rgb.shape[:2]
+    ix = int(round(x))
+    iy = int(round(y))
+    c_ix = min(max(0, ix), w - 1)
+    c_iy = min(max(0, iy), h - 1)
+
+    # Fast single pixel check
+    px = image_rgb[c_iy, c_ix]
+    if int(px[0]) > dark_thresh or int(px[1]) > dark_thresh or int(px[2]) > dark_thresh:
+        return False
+
+    # Check local patch to confirm contiguous nodata region vs isolated shadow
+    x0, x1 = max(0, c_ix - patch_radius), min(w, c_ix + patch_radius + 1)
+    y0, y1 = max(0, c_iy - patch_radius), min(h, c_iy + patch_radius + 1)
+    patch = image_rgb[y0:y1, x0:x1]
+
+    # In true nodata regions, the vast majority of patch pixels are dark (<= dark_thresh)
+    dark_fraction = float(np.mean((patch <= dark_thresh).all(axis=2)))
+    return dark_fraction >= 0.4
 
 
 def extract_rows_from_canopies(
@@ -116,9 +168,15 @@ def extract_rows_from_canopies(
     min_vines_per_row: int = 2,
     spacing_threshold_px: float = 45.0,
     return_metadata: bool = True,
+    image_rgb: Optional[np.ndarray] = None,
+    headland_margin_px: float = 60.0,
 ) -> Tuple[List[VineRow], List[Tuple[float, float]], Optional[Dict[str, Any]]]:
     """
     Extract vine row polylines from detected canopy centroids.
+    Limits row polylines strictly to the physical vineyard planting:
+    - Rows terminate at the first and last vine in that tile (+ headland margin ~60px / 1.5m).
+    - Rows do not extend across roads, cleared land, or into black/nodata image borders.
+    - Collinear row centerlines remain straight, aligned with dominant azimuth.
 
     Returns:
         (rows, inspection_targets, metadata)
@@ -175,6 +233,7 @@ def extract_rows_from_canopies(
         proj_along = np.dot(cluster, primary_dir)
         along_sort = np.argsort(proj_along)
         cluster_sorted = cluster[along_sort]
+        proj_sorted = proj_along[along_sort]
 
         # Check for gaps between consecutive vines along row
         diffs = np.diff(cluster_sorted, axis=0)
@@ -197,8 +256,8 @@ def extract_rows_from_canopies(
         # Centreline normal coordinate
         c_mean = float(np.mean(np.dot(cluster, normal_dir)))
 
-        # Clip straight line to tile boundaries
-        polyline_pts = clip_line_to_tile(
+        # Bounds of the tile along primary_dir for this row
+        tile_bounds = get_line_tile_s_bounds(
             c_val=c_mean,
             normal_dir=normal_dir,
             primary_dir=primary_dir,
@@ -206,14 +265,89 @@ def extract_rows_from_canopies(
             tile_height=float(tile_height),
         )
 
-        # Fallback to cluster endpoints if clipping fails
-        if len(polyline_pts) < 2:
-            p_start = cluster_sorted[0]
-            p_end = cluster_sorted[-1]
+        # Minimum and maximum projection of vines along the row
+        s_min_vine = float(proj_sorted[0])
+        s_max_vine = float(proj_sorted[-1])
+
+        if tile_bounds is not None:
+            s_tile_min, s_tile_max = tile_bounds
+            s_start_vine = min(max(s_min_vine, s_tile_min), s_tile_max)
+            s_end_vine = min(max(s_max_vine, s_tile_min), s_tile_max)
+        else:
+            s_tile_min, s_tile_max = s_min_vine, s_max_vine
+            s_start_vine, s_end_vine = s_min_vine, s_max_vine
+
+        # Limit to outermost vines + headland margin (~60px / 1.5m), bounded by tile
+        s_lo = max(s_start_vine - headland_margin_px, s_tile_min)
+        s_hi = min(s_end_vine + headland_margin_px, s_tile_max)
+
+        # If image_rgb is provided, ensure line does not extend into black/nodata borders
+        if image_rgb is not None:
+            def is_valid_s(s_val: float) -> bool:
+                pt = c_mean * normal_dir + s_val * primary_dir
+                return not is_nodata_pixel(image_rgb, pt[0], pt[1])
+
+            # Trace outwards from first vine towards s_lo
+            curr_s = s_start_vine
+            step = 2.0
+            stopped_early = False
+            while curr_s - step >= s_lo:
+                if not is_valid_s(curr_s - step):
+                    s_lo = curr_s
+                    stopped_early = True
+                    break
+                curr_s -= step
+            if not stopped_early:
+                if not is_valid_s(s_lo):
+                    s_lo = curr_s
+
+            # Trace outwards from last vine towards s_hi
+            curr_s = s_end_vine
+            stopped_early = False
+            while curr_s + step <= s_hi:
+                if not is_valid_s(curr_s + step):
+                    s_hi = curr_s
+                    stopped_early = True
+                    break
+                curr_s += step
+            if not stopped_early:
+                if not is_valid_s(s_hi):
+                    s_hi = curr_s
+
+        # Final safety bounds check against tile
+        s_lo = max(s_lo, s_tile_min)
+        s_hi = min(s_hi, s_tile_max)
+        if s_lo > s_hi:
+            s_lo, s_hi = s_start_vine, s_end_vine
+
+        p_start = c_mean * normal_dir + s_lo * primary_dir
+        p_end = c_mean * normal_dir + s_hi * primary_dir
+
+        # Clamp endpoints strictly to [0, tile_width] x [0, tile_height]
+        p_start = np.clip(p_start, [0.0, 0.0], [float(tile_width), float(tile_height)])
+        p_end = np.clip(p_end, [0.0, 0.0], [float(tile_width), float(tile_height)])
+
+        polyline_pts = [
+            (round(float(p_start[0]), 1), round(float(p_start[1]), 1)),
+            (round(float(p_end[0]), 1), round(float(p_end[1]), 1)),
+        ]
+
+        # Fallback to cluster endpoints if points collapsed
+        if len(polyline_pts) < 2 or polyline_pts[0] == polyline_pts[1]:
+            p_start_fb = cluster_sorted[0]
+            p_end_fb = cluster_sorted[-1]
+            p_start_fb = np.clip(p_start_fb, [0.0, 0.0], [float(tile_width), float(tile_height)])
+            p_end_fb = np.clip(p_end_fb, [0.0, 0.0], [float(tile_width), float(tile_height)])
             polyline_pts = [
-                (round(float(p_start[0]), 1), round(float(p_start[1]), 1)),
-                (round(float(p_end[0]), 1), round(float(p_end[1]), 1)),
+                (round(float(p_start_fb[0]), 1), round(float(p_start_fb[1]), 1)),
+                (round(float(p_end_fb[0]), 1), round(float(p_end_fb[1]), 1)),
             ]
+
+        # Recalculate true s_min and s_max from final polyline points
+        final_s_0 = float(np.dot(np.array(polyline_pts[0]), primary_dir))
+        final_s_1 = float(np.dot(np.array(polyline_pts[1]), primary_dir))
+        actual_s_min = min(final_s_0, final_s_1)
+        actual_s_max = max(final_s_0, final_s_1)
 
         v_row = VineRow(
             points=polyline_pts,
@@ -230,6 +364,8 @@ def extract_rows_from_canopies(
             "points": polyline_pts,
             "cluster": cluster,
             "vine_row": v_row,
+            "s_min": actual_s_min,
+            "s_max": actual_s_max,
         })
 
     meta = {
